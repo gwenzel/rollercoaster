@@ -37,6 +37,7 @@ def generate_track(height_peak, drop_angle, loop_radius, num_hills, hill_amplitu
     x5 = np.linspace(x4[-1], x4[-1] + final_length, 50)
     y5 = np.ones_like(x5) * y4[-1]
 
+    # section 6
 
     x = np.concatenate([x1, x2, x3, x4, x5])
     y = np.concatenate([y1, y2, y3, y4, y5])
