@@ -14,7 +14,7 @@ os.makedirs("models", exist_ok=True)
 
 # Model parameters (matching typical acceleration data)
 seq_length = 1000  # Typical track has ~1000 points
-input_size = 1     # We have acceleration as single feature
+input_size = 3     # 3-axis accelerometer: Lateral, Vertical, Longitudinal
 hidden_size = 128
 num_layers = 2
 dropout = 0.3
@@ -43,9 +43,14 @@ def init_weights(m):
 model.apply(init_weights)
 
 # Create dummy scalers based on typical acceleration data
-# Typical acceleration ranges from -5 to 5 m/s^2 for rollercoasters
+# Typical acceleration ranges for wearable data (in g-forces):
+# Lateral: -1 to 1g, Vertical: 0 to 3g, Longitudinal: -0.5 to 0.5g
 scaler_accel = StandardScaler()
-dummy_accel_data = np.random.randn(seq_length * 10, input_size) * 2  # Mean 0, std 2
+dummy_accel_data = np.random.randn(seq_length * 10, input_size)
+# Scale each axis appropriately
+dummy_accel_data[:, 0] *= 0.5  # Lateral
+dummy_accel_data[:, 1] = dummy_accel_data[:, 1] * 0.5 + 1.0  # Vertical (centered at 1g)
+dummy_accel_data[:, 2] *= 0.3  # Longitudinal
 scaler_accel.fit(dummy_accel_data)
 
 # Typical coaster ratings range from 3.0 to 5.0

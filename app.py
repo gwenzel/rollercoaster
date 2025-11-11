@@ -153,9 +153,13 @@ with col2:
             This score is predicted by a **Bidirectional GRU neural network** 
             trained on real rollercoaster acceleration data and ratings.
             
-            - **Input**: Acceleration time series from your custom track
+            - **Input**: 3-axis accelerometer data (Lateral, Vertical, Longitudinal)
+            - **Transformation**: Track coordinates → Rider's reference frame
             - **Output**: Predicted rating (1.0 - 5.0)
             - **Model**: 2-layer BiGRU with attention mechanism
+            
+            The model analyzes how a rider would experience the forces, 
+            using data from wearable accelerometers mounted on real coasters.
             """)
     
     st.subheader("📊 Track Statistics")

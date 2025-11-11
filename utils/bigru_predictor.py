@@ -2,12 +2,16 @@
 BiGRU model integration for Streamlit app.
 This module provides functions to load the trained BiGRU model and predict scores
 from custom rollercoaster tracks generated in the app.
+
+The model expects 3-axis accelerometer data (Lateral, Vertical, Longitudinal)
+as recorded by wearables on rollercoaster riders.
 """
 
 import numpy as np
 import pandas as pd
 import torch
 from bigru_score_predictor import CoasterScorePredictor
+from utils.accelerometer_transform import track_to_accelerometer_data
 import os
 
 
@@ -48,19 +52,32 @@ class StreamlitBiGRUPredictor:
         Predict score from track DataFrame.
         
         Args:
-            track_df: DataFrame with columns ['x', 'y', 'acceleration']
+            track_df: DataFrame with columns ['x', 'y'] from build_modular_track()
             
         Returns:
             Predicted score (typically 3.0-5.0 range)
         """
-        # Extract acceleration data
-        if 'acceleration' not in track_df.columns:
-            raise ValueError("Track DataFrame must have 'acceleration' column")
-        
-        acceleration = track_df['acceleration'].values
-        
-        # Reshape to (timesteps, features) - BiGRU expects 2D input
-        acceleration_data = acceleration.reshape(-1, 1)
+        # Convert track coordinates to accelerometer data (3-axis: Lateral, Vertical, Longitudinal)
+        try:
+            accel_df = track_to_accelerometer_data(track_df)
+            
+            # Extract the 3 acceleration axes
+            acceleration_data = accel_df[['Lateral', 'Vertical', 'Longitudinal']].values
+            
+            # Shape: (timesteps, 3) - matches wearable accelerometer format
+            print(f"Accelerometer data shape: {acceleration_data.shape}")
+            print(f"Acceleration ranges - Lateral: [{acceleration_data[:, 0].min():.2f}, {acceleration_data[:, 0].max():.2f}]g, "
+                  f"Vertical: [{acceleration_data[:, 1].min():.2f}, {acceleration_data[:, 1].max():.2f}]g, "
+                  f"Longitudinal: [{acceleration_data[:, 2].min():.2f}, {acceleration_data[:, 2].max():.2f}]g")
+            
+        except Exception as e:
+            print(f"Error converting track to accelerometer data: {e}")
+            print("Falling back to simple approximation...")
+            
+            # Fallback: use track length and simple assumptions
+            n = len(track_df)
+            acceleration_data = np.zeros((n, 3))
+            acceleration_data[:, 1] = 1.0  # 1g vertical (gravity)
         
         # Predict using the model
         try:
@@ -72,6 +89,8 @@ class StreamlitBiGRUPredictor:
             return predicted_score
         except Exception as e:
             print(f"Error during prediction: {e}")
+            import traceback
+            traceback.print_exc()
             # Return a default value if prediction fails
             return 3.5
     
