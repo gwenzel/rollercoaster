@@ -5,6 +5,8 @@ import pandas as pd
 from utils.track import build_modular_track, compute_features_modular, compute_acceleration
 from utils.visualize import plot_track
 from utils.model import predict_thrill
+from utils.bigru_predictor import predict_score_bigru
+import os
 
 
 st.set_page_config(page_title="AI Roller Coaster Designer", layout="wide")
@@ -107,8 +109,19 @@ track_df = compute_acceleration(track_df, max_height)
 # --- Compute Features ---
 features = compute_features_modular(track_df, st.session_state.track_elements)
 
-# --- Predict Thrill ---
+# --- Predict Thrill (rule-based) ---
 predicted_thrill = predict_thrill(features)
+
+# --- Predict Score with BiGRU (if model exists) ---
+model_path = "models/bigru_score_model.pth"
+bigru_score = None
+bigru_error = None
+
+if os.path.exists(model_path):
+    try:
+        bigru_score = predict_score_bigru(track_df, model_path)
+    except Exception as e:
+        bigru_error = str(e)
 
 # --- Main Layout ---
 col1, col2 = st.columns([2, 1])
@@ -117,7 +130,34 @@ with col1:
     st.plotly_chart(plot_track(track_df, color_by="acceleration"), width='stretch')
 
 with col2:
-    st.metric("🎯 Predicted Thrill", f"{predicted_thrill:.2f}/10")
+    # Display predictions
+    st.subheader("🎯 Predictions")
+    
+    col2a, col2b = st.columns(2)
+    
+    with col2a:
+        st.metric("Rule-Based Thrill", f"{predicted_thrill:.2f}/10")
+    
+    with col2b:
+        if bigru_score is not None:
+            st.metric("🧠 BiGRU Score", f"{bigru_score:.2f}/5.0")
+        elif bigru_error:
+            st.error(f"BiGRU Error: {bigru_error}")
+        else:
+            st.info("No BiGRU model found")
+    
+    # Model info
+    if bigru_score is not None:
+        with st.expander("ℹ️ About BiGRU Model"):
+            st.write("""
+            This score is predicted by a **Bidirectional GRU neural network** 
+            trained on real rollercoaster acceleration data and ratings.
+            
+            - **Input**: Acceleration time series from your custom track
+            - **Output**: Predicted rating (1.0 - 5.0)
+            - **Model**: 2-layer BiGRU with attention mechanism
+            """)
+    
     st.subheader("📊 Track Statistics")
     st.json(features)
     
