@@ -7,3 +7,4 @@ utils/__pycache__/model.cpython-311.pyc
 utils/__pycache__/track.cpython-311.pyc
 
 !accel_data/*
+*.xlsx
