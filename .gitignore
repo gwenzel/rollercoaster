@@ -1,10 +1,29 @@
+# Python
 *.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data files (keep specific ones with !)
 *.csv
 *.json
-*.png
-utils/__pycache__/*
-utils/__pycache__/model.cpython-311.pyc
-utils/__pycache__/track.cpython-311.pyc
-
-!accel_data/*
 *.xlsx
+!accel_data/*
+
+# Images
+*.png
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

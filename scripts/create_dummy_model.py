@@ -3,11 +3,13 @@ Create a dummy trained model for demonstration purposes.
 This creates a simple model with realistic parameters but random weights.
 """
 
+import sys
 import torch
 import numpy as np
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from bigru_score_predictor import BiGRUScorePredictor
 import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from scripts.bigru_score_predictor import BiGRUScorePredictor
 
 # Create models directory if it doesn't exist
 os.makedirs("models", exist_ok=True)

@@ -4,9 +4,10 @@ Run this to train the model on your acceleration and ratings data.
 """
 
 import sys
-sys.path.append('.')
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from bigru_score_predictor import CoasterScorePredictor
+from scripts.bigru_score_predictor import CoasterScorePredictor
 import matplotlib.pyplot as plt
 import torch
 
