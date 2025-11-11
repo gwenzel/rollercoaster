@@ -128,7 +128,7 @@ class CoasterScorePredictor:
         self,
         accel_data_dir: str = "accel_data",
         ratings_data_path: str = "ratings_data/processed_all_reviews_metadata_20251110_161035.csv",
-        name_mapping_module: str = "coaster_name_mapping",
+        name_mapping_module: Optional[str] = "coaster_name_mapping",
         seq_length: Optional[int] = None,  # Auto-detect if None
         device: Optional[str] = None
     ):
@@ -136,17 +136,24 @@ class CoasterScorePredictor:
         Args:
             accel_data_dir: Directory containing acceleration CSV files
             ratings_data_path: Path to ratings data CSV
-            name_mapping_module: Module name for coaster name mapping
+            name_mapping_module: Module name for coaster name mapping (None to skip)
             seq_length: Fixed sequence length (will pad/truncate if needed)
             device: 'cuda', 'cpu', or None (auto-detect)
         """
         self.accel_data_dir = accel_data_dir
         self.ratings_data_path = ratings_data_path
         
-        # Import name mapping
-        import importlib
-        mapping_module = importlib.import_module(name_mapping_module)
-        self.name_mapping = mapping_module.COASTER_NAME_MAPPING
+        # Import name mapping only if provided
+        if name_mapping_module is not None:
+            import importlib
+            try:
+                mapping_module = importlib.import_module(name_mapping_module)
+                self.name_mapping = mapping_module.COASTER_NAME_MAPPING
+            except ImportError:
+                print(f"Warning: Could not import {name_mapping_module}, skipping name mapping")
+                self.name_mapping = {}
+        else:
+            self.name_mapping = {}
         
         # Device setup
         if device is None:

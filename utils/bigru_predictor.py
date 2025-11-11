@@ -10,7 +10,7 @@ as recorded by wearables on rollercoaster riders.
 import numpy as np
 import pandas as pd
 import torch
-from bigru_score_predictor import CoasterScorePredictor
+from scripts.bigru_score_predictor import CoasterScorePredictor
 from utils.accelerometer_transform import track_to_accelerometer_data
 import os
 
@@ -39,10 +39,19 @@ class StreamlitBiGRUPredictor:
             )
         
         # Create predictor without data paths (we'll only use it for inference)
-        self.predictor = CoasterScorePredictor(
-            accel_data_dir="accel_data",  # Not used for inference
-            ratings_data_path="ratings_data/dummy.csv"  # Not used for inference
-        )
+        # Use name_mapping_module=None to skip the import that causes the error
+        try:
+            self.predictor = CoasterScorePredictor(
+                accel_data_dir="accel_data",  # Not used for inference
+                ratings_data_path="ratings_data/dummy.csv",  # Not used for inference
+                name_mapping_module=None  # Skip name mapping for inference-only mode
+            )
+        except TypeError:
+            # Fallback for older version without name_mapping_module parameter
+            self.predictor = CoasterScorePredictor(
+                accel_data_dir="accel_data",
+                ratings_data_path="ratings_data/dummy.csv"
+            )
         
         # Load the trained model
         self.predictor.load_model(self.model_path)
