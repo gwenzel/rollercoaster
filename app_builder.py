@@ -93,8 +93,9 @@ def vertical_drop_profile(height=40, steepness=0.9, **kwargs):
     horizontal_distance = min_horizontal_distance / steepness
     
     x = np.linspace(0, horizontal_distance, 30)
-    # Use parabolic drop for smooth transition
-    y = current_height - (x / x[-1])**2 * drop_height
+    # Drop from y=0 (connection point) down by drop_height
+    # The offset is applied in generate_track_from_blocks
+    y = np.linspace(0, -drop_height, len(x))
     return x, y
 
 def loop_profile(diameter=30, **kwargs):
