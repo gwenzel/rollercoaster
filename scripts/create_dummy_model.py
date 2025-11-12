@@ -72,7 +72,7 @@ checkpoint = {
     'seq_length': seq_length,
 }
 
-model_path = "models/bigru_score_model.pth"
+model_path = "models/bigru_score_model_dummy.pth"
 torch.save(checkpoint, model_path)
 
 print("=" * 70)

@@ -203,6 +203,120 @@ if 'track_generated' not in st.session_state:
 with st.sidebar:
     st.header("🧱 Building Blocks")
     
+    # Quick Start section at the top
+    st.subheader("🎲 Quick Start")
+    
+    col_rand1_top, col_rand2_top = st.columns(2)
+    
+    with col_rand1_top:
+        if st.button("🎲 Random Template", key="random_top", use_container_width=True, help="Generate a random coaster with 4-8 blocks"):
+            import random
+            
+            # Random number of blocks (4-8)
+            num_blocks = random.randint(4, 8)
+            
+            # Always start with a lift hill
+            new_sequence = [{
+                'type': 'lift_hill',
+                'block': BLOCK_LIBRARY['lift_hill'],
+                'params': {
+                    'length': random.randint(30, 80),
+                    'height': random.randint(30, 60)
+                }
+            }]
+            
+            # Available blocks (excluding lift_hill for now)
+            available_blocks = ['drop', 'loop', 'airtime_hill', 'spiral', 'bunny_hop', 'banked_turn']
+            
+            for i in range(num_blocks - 2):  # -2 because we have lift_hill and will add flat_section
+                block_type = random.choice(available_blocks)
+                
+                if block_type == 'drop':
+                    params = {
+                        'height': random.randint(20, 50),
+                        'steepness': random.uniform(0.6, 0.85)  # Max 30° angle
+                    }
+                elif block_type == 'loop':
+                    params = {'diameter': random.randint(20, 40)}
+                elif block_type == 'airtime_hill':
+                    params = {
+                        'length': random.randint(25, 50),
+                        'height': random.randint(8, 20)
+                    }
+                elif block_type == 'spiral':
+                    params = {
+                        'diameter': random.randint(20, 35),
+                        'turns': random.uniform(1.0, 2.5)
+                    }
+                elif block_type == 'bunny_hop':
+                    params = {
+                        'length': random.randint(15, 25),
+                        'height': random.randint(5, 12)
+                    }
+                elif block_type == 'banked_turn':
+                    params = {
+                        'radius': random.randint(20, 40),
+                        'angle': random.randint(60, 120)
+                    }
+                
+                new_sequence.append({
+                    'type': block_type,
+                    'block': BLOCK_LIBRARY[block_type],
+                    'params': params
+                })
+            
+            # Always end with a flat section (brake run)
+            new_sequence.append({
+                'type': 'flat_section',
+                'block': BLOCK_LIBRARY['flat_section'],
+                'params': {'length': random.randint(25, 40)}
+            })
+            
+            st.session_state.track_sequence = new_sequence
+            st.session_state.track_generated = False
+            st.success(f"🎲 Generated random coaster with {num_blocks} blocks!")
+            st.rerun()
+    
+    with col_rand2_top:
+        if st.button("🔄 \n Reset to Default", key="reset_top", use_container_width=True, help="Reset to the starter template"):
+            st.session_state.track_sequence = [
+                {
+                    'type': 'lift_hill',
+                    'block': BLOCK_LIBRARY['lift_hill'],
+                    'params': {'length': 60, 'height': 35}
+                },
+                {
+                    'type': 'airtime_hill',
+                    'block': BLOCK_LIBRARY['airtime_hill'],
+                    'params': {'length': 45, 'height': 12}
+                },
+                {
+                    'type': 'bunny_hop',
+                    'block': BLOCK_LIBRARY['bunny_hop'],
+                    'params': {'length': 25, 'height': 6}
+                },
+                {
+                    'type': 'bunny_hop',
+                    'block': BLOCK_LIBRARY['bunny_hop'],
+                    'params': {'length': 20, 'height': 5}
+                },
+                {
+                    'type': 'airtime_hill',
+                    'block': BLOCK_LIBRARY['airtime_hill'],
+                    'params': {'length': 40, 'height': 10}
+                },
+                {
+                    'type': 'flat_section',
+                    'block': BLOCK_LIBRARY['flat_section'],
+                    'params': {'length': 25}
+                }
+            ]
+            st.session_state.track_generated = False
+            st.success("🔄 Reset to default template!")
+            st.rerun()
+    
+    st.divider()
+    
     st.markdown("""
     <div style="background-color: #e3f2fd; padding: 0.8rem; border-radius: 0.3rem; margin-bottom: 1rem; color: #1a1a1a;">
     <b style="color: #0d47a1;">Instructions:</b><br>
@@ -294,120 +408,6 @@ with st.sidebar:
         st.session_state.track_generated = False
         st.success(f"✅ Added {selected_block.name}")
         st.rerun()
-    
-    st.divider()
-    
-    # Random template generator
-    st.subheader("🎲 Quick Start")
-    
-    col_rand1, col_rand2 = st.columns(2)
-    
-    with col_rand1:
-        if st.button("🎲 Random Template", use_container_width=True, help="Generate a random coaster with 4-8 blocks"):
-            import random
-            
-            # Random number of blocks (4-8)
-            num_blocks = random.randint(4, 8)
-            
-            # Always start with a lift hill
-            new_sequence = [{
-                'type': 'lift_hill',
-                'block': BLOCK_LIBRARY['lift_hill'],
-                'params': {
-                    'length': random.randint(30, 80),
-                    'height': random.randint(30, 60)
-                }
-            }]
-            
-            # Available blocks (excluding lift_hill for now)
-            available_blocks = ['drop', 'loop', 'airtime_hill', 'spiral', 'bunny_hop', 'banked_turn']
-            
-            for i in range(num_blocks - 2):  # -2 because we have lift_hill and will add flat_section
-                block_type = random.choice(available_blocks)
-                
-                if block_type == 'drop':
-                    params = {
-                        'height': random.randint(20, 50),
-                        'steepness': random.uniform(0.6, 0.85)  # Max 30° angle
-                    }
-                elif block_type == 'loop':
-                    params = {'diameter': random.randint(20, 40)}
-                elif block_type == 'airtime_hill':
-                    params = {
-                        'length': random.randint(25, 50),
-                        'height': random.randint(8, 20)
-                    }
-                elif block_type == 'spiral':
-                    params = {
-                        'diameter': random.randint(20, 35),
-                        'turns': random.uniform(1.0, 2.5)
-                    }
-                elif block_type == 'bunny_hop':
-                    params = {
-                        'length': random.randint(15, 25),
-                        'height': random.randint(5, 12)
-                    }
-                elif block_type == 'banked_turn':
-                    params = {
-                        'radius': random.randint(20, 40),
-                        'angle': random.randint(60, 120)
-                    }
-                
-                new_sequence.append({
-                    'type': block_type,
-                    'block': BLOCK_LIBRARY[block_type],
-                    'params': params
-                })
-            
-            # Always end with a flat section (brake run)
-            new_sequence.append({
-                'type': 'flat_section',
-                'block': BLOCK_LIBRARY['flat_section'],
-                'params': {'length': random.randint(25, 40)}
-            })
-            
-            st.session_state.track_sequence = new_sequence
-            st.session_state.track_generated = False
-            st.success(f"🎲 Generated random coaster with {num_blocks} blocks!")
-            st.rerun()
-    
-    with col_rand2:
-        if st.button("🔄 Reset to Default", use_container_width=True, help="Reset to the starter template"):
-            st.session_state.track_sequence = [
-                {
-                    'type': 'lift_hill',
-                    'block': BLOCK_LIBRARY['lift_hill'],
-                    'params': {'length': 60, 'height': 35}
-                },
-                {
-                    'type': 'airtime_hill',
-                    'block': BLOCK_LIBRARY['airtime_hill'],
-                    'params': {'length': 45, 'height': 12}
-                },
-                {
-                    'type': 'bunny_hop',
-                    'block': BLOCK_LIBRARY['bunny_hop'],
-                    'params': {'length': 25, 'height': 6}
-                },
-                {
-                    'type': 'bunny_hop',
-                    'block': BLOCK_LIBRARY['bunny_hop'],
-                    'params': {'length': 20, 'height': 5}
-                },
-                {
-                    'type': 'airtime_hill',
-                    'block': BLOCK_LIBRARY['airtime_hill'],
-                    'params': {'length': 40, 'height': 10}
-                },
-                {
-                    'type': 'flat_section',
-                    'block': BLOCK_LIBRARY['flat_section'],
-                    'params': {'length': 25}
-                }
-            ]
-            st.session_state.track_generated = False
-            st.success("🔄 Reset to default template!")
-            st.rerun()
     
     st.divider()
     
@@ -655,7 +655,7 @@ def generate_track_from_blocks():
     
     if not is_valid:
         # Apply moderate smoothing to fix remaining issues
-        all_x, all_y = smooth_track_profile(all_x, all_y, smoothness_factor=1.0)  # Reduced from default
+        all_x, all_y = smooth_track_profile(all_x, all_y, smoothness_factor=0.3)  # Reduced from default
         st.session_state.smoothness_warning = f"⚠️ Track smoothed to remove vertical sections (max angle was {max_angle:.1f}°)"
     else:
         # Skip global smoothing if joints already smoothed well
@@ -791,28 +791,114 @@ if len(st.session_state.track_sequence) > 0:
     # Always get AI rating automatically
     st.session_state.get_ai_rating = True
 
-# Ride configuration
-if len(st.session_state.track_sequence) > 0:
-    st.subheader("⚙️ Ride Configuration")
-    initial_speed = st.slider("Initial Speed (m/s)", 5.0, 30.0, 15.0, 1.0)
-    st.caption("Launch speed or chain lift speed")
-    st.session_state.initial_speed = initial_speed
-
 # Create layout with multiple plots
 if st.session_state.track_generated:
-    # Show joint smoothing info
-    info_col1, info_col2 = st.columns(2)
-    with info_col1:
-        if hasattr(st.session_state, 'joint_smoothing_applied'):
-            st.info(st.session_state.joint_smoothing_applied)
-    with info_col2:
-        if hasattr(st.session_state, 'smoothness_warning') and st.session_state.smoothness_warning:
-            st.warning(st.session_state.smoothness_warning)
-    
     # Create subplots layout
     st.subheader("🎢 Your Roller Coaster Design")
     
-    # Row 1: Track profile and 3D view
+    # Row 0: AI Rating Prediction (COMPACT)
+    st.markdown("**🤖 AI Rating Prediction**")
+    
+    try:
+        # Convert to 3D track format for the AI model
+        track_df = pd.DataFrame({
+            'x': st.session_state.track_x,
+            'y': st.session_state.track_y,
+            'z': np.zeros_like(st.session_state.track_x)  # No lateral banking yet
+        })
+        
+        # Get accelerometer data using the existing function
+        accel_df = track_to_accelerometer_data(track_df)
+        
+        if accel_df is not None and len(accel_df) > 10:
+            # Store for g-force plot
+            st.session_state.accel_df = accel_df
+            
+            # Check safety FIRST before showing rating
+            safety = check_gforce_safety(accel_df)
+            
+            if safety['dangers']:
+                # DANGEROUS - Compact warning
+                st.error("🚨 **UNSAFE DESIGN** - This ride would be DANGEROUS to riders!")
+                for danger in safety['dangers']:
+                    st.markdown(f"- {danger}")
+                st.caption("⚠️ Fix safety issues before evaluating ride quality")
+                
+            elif safety['warnings']:
+                # Has warnings - compact format with rating
+                col_warn, col_rate = st.columns([1, 1])
+                with col_warn:
+                    st.warning("**⚠️ SAFETY CONCERNS**")
+                    for warning in safety['warnings']:
+                        st.caption(warning)
+                
+                with col_rate:
+                    predicted_rating = predict_score_bigru(accel_df)
+                    st.session_state.predicted_rating = predicted_rating
+                    st.markdown(f'<div style="font-size: 2rem; font-weight: bold; text-align: center; color: #FFD700;">⭐ {predicted_rating:.2f}</div>', 
+                               unsafe_allow_html=True)
+                    st.caption("⚠️ Has comfort issues")
+                
+            else:
+                # SAFE - Compact two-column layout
+                col_bucket, col_rating = st.columns([1, 1])
+                
+                predicted_rating = predict_score_bigru(accel_df)
+                st.session_state.predicted_rating = predicted_rating
+                
+                with col_bucket:
+                    # Interpretation
+                    if predicted_rating >= 4.5:
+                        st.success("🔥 **World-Class!**")
+                        st.balloons()
+                    elif predicted_rating >= 4.0:
+                        st.success("🎉 **Excellent!**")
+                    elif predicted_rating >= 3.5:
+                        st.info("👍 **Great Ride!**")
+                    elif predicted_rating >= 3.0:
+                        st.info("😊 **Solid Design**")
+                    else:
+                        st.warning("💡 **Needs More Excitement**")
+                
+                with col_rating:
+                    # Numerical rating with smaller display
+                    st.markdown(f'<div style="font-size: 2.5rem; font-weight: bold; text-align: center; color: #FFD700; margin-top: 0;">⭐ {predicted_rating:.2f}</div>', 
+                               unsafe_allow_html=True)
+                    st.progress(predicted_rating / 5.0)
+            
+        else:
+            st.error("Track too short for AI analysis")
+            # Fallback to simple g-force analysis
+            initial_speed = st.session_state.get('initial_speed', 15.0)
+            st.session_state.accel_df = simple_gforce_analysis(
+                st.session_state.track_x, 
+                st.session_state.track_y, 
+                initial_speed=initial_speed
+            )
+            
+    except Exception as e:
+        st.error(f"AI Error: {str(e)}")
+        st.caption("Using simple physics model instead...")
+        # Fallback to simple g-force analysis
+        initial_speed = st.session_state.get('initial_speed', 15.0)
+        st.session_state.accel_df = simple_gforce_analysis(
+            st.session_state.track_x, 
+            st.session_state.track_y, 
+            initial_speed=initial_speed
+        )
+    
+    # Ensure we always have g-force data for the plots
+    if not hasattr(st.session_state, 'accel_df'):
+        initial_speed = st.session_state.get('initial_speed', 15.0)
+        st.session_state.accel_df = simple_gforce_analysis(
+            st.session_state.track_x, 
+            st.session_state.track_y, 
+            initial_speed=initial_speed
+        )
+    
+    st.divider()
+    
+    # Row 1: Track profile and Statistics
     col1, col2 = st.columns(2)
     
     with col1:
@@ -914,6 +1000,23 @@ if st.session_state.track_generated:
     
     st.divider()
     
+    # Show joint smoothing info
+    info_col1, info_col2 = st.columns(2)
+    with info_col1:
+        if hasattr(st.session_state, 'joint_smoothing_applied'):
+            st.info(st.session_state.joint_smoothing_applied)
+    with info_col2:
+        if hasattr(st.session_state, 'smoothness_warning') and st.session_state.smoothness_warning:
+            st.warning(st.session_state.smoothness_warning)
+    
+    # Ride configuration
+    st.subheader("⚙️ Ride Configuration")
+    initial_speed = st.slider("Initial Speed (m/s)", 5.0, 30.0, 15.0, 1.0, key="speed_slider")
+    st.caption("Launch speed or chain lift speed")
+    st.session_state.initial_speed = initial_speed
+    
+    st.divider()
+    
     # Row 1.5: Curvature Analysis
     if hasattr(st.session_state, 'track_curvature'):
         st.markdown("**Track Curvature Profile**")
@@ -960,189 +1063,85 @@ if st.session_state.track_generated:
     
     st.divider()
     
-    # Row 2: AI Rating and G-Forces
-    col3, col4 = st.columns([1, 2])
+    # Row 2: G-Force Analysis
+    st.markdown("**G-Force Analysis**")
     
-    with col3:
-        st.markdown("**🤖 AI Rating Prediction**")
+    if 'accel_df' in st.session_state:
+        accel_df = st.session_state.accel_df
         
-        try:
-            # Convert to 3D track format for the AI model
-            track_df = pd.DataFrame({
-                'x': st.session_state.track_x,
-                'y': st.session_state.track_y,
-                'z': np.zeros_like(st.session_state.track_x)  # No lateral banking yet
-            })
-            
-            # Get accelerometer data using the existing function
-            accel_df = track_to_accelerometer_data(track_df)
-            
-            if accel_df is not None and len(accel_df) > 10:
-                # Store for g-force plot
-                st.session_state.accel_df = accel_df
-                
-                # Check safety FIRST before showing rating
-                safety = check_gforce_safety(accel_df)
-                
-                if safety['dangers']:
-                    # DANGEROUS - Hide rating and show big warning
-                    st.error("### 🚨 UNSAFE DESIGN")
-                    st.markdown("**This ride would be DANGEROUS to riders!**")
-                    st.markdown("---")
-                    for danger in safety['dangers']:
-                        st.markdown(f"### {danger}")
-                    st.markdown("---")
-                    st.warning("⚠️ Fix safety issues before evaluating ride quality")
-                    
-                elif safety['warnings']:
-                    # Has warnings - show rating but emphasize warnings
-                    st.warning("### ⚠️ SAFETY CONCERNS")
-                    for warning in safety['warnings']:
-                        st.markdown(f"**{warning}**")
-                    
-                    st.markdown("---")
-                    
-                    # Show rating with context
-                    predicted_rating = predict_score_bigru(accel_df)
-                    st.session_state.predicted_rating = predicted_rating
-                    
-                    st.markdown(f'<div class="rating-display">⭐ {predicted_rating:.2f}</div>', 
-                               unsafe_allow_html=True)
-                    st.caption("⚠️ Rating shown, but ride has comfort issues")
-                    
-                else:
-                    # SAFE - Show rating normally
-                    predicted_rating = predict_score_bigru(accel_df)
-                    st.session_state.predicted_rating = predicted_rating
-                    
-                    st.markdown(f'<div class="rating-display">⭐ {predicted_rating:.2f}</div>', 
-                               unsafe_allow_html=True)
-                    
-                    # Rating bar
-                    st.progress(predicted_rating / 5.0)
-                    
-                    # Interpretation
-                    if predicted_rating >= 4.5:
-                        st.success("🔥 **World-Class!**")
-                        st.balloons()
-                    elif predicted_rating >= 4.0:
-                        st.success("🎉 **Excellent!**")
-                    elif predicted_rating >= 3.5:
-                        st.info("👍 **Great Ride!**")
-                    elif predicted_rating >= 3.0:
-                        st.info("😊 **Solid Design**")
-                    else:
-                        st.warning("💡 **Needs More Excitement**")
-                
-            else:
-                st.error("Track too short for AI analysis")
-                # Fallback to simple g-force analysis
-                initial_speed = st.session_state.get('initial_speed', 15.0)
-                st.session_state.accel_df = simple_gforce_analysis(
-                    st.session_state.track_x, 
-                    st.session_state.track_y, 
-                    initial_speed=initial_speed
-                )
-                
-        except Exception as e:
-            st.error(f"AI Error: {str(e)}")
-            st.caption("Using simple physics model instead...")
-            # Fallback to simple g-force analysis
-            initial_speed = st.session_state.get('initial_speed', 15.0)
-            st.session_state.accel_df = simple_gforce_analysis(
-                st.session_state.track_x, 
-                st.session_state.track_y, 
-                initial_speed=initial_speed
-            )
+        # Create subplots for each G-force
+        fig_g = make_subplots(
+            rows=3, cols=1,
+            subplot_titles=("Vertical G-Forces", "Lateral G-Forces", "Longitudinal G-Forces"),
+            vertical_spacing=0.12
+        )
         
-        # Ensure we always have g-force data for the plots
-        if not hasattr(st.session_state, 'accel_df'):
-            initial_speed = st.session_state.get('initial_speed', 15.0)
-            st.session_state.accel_df = simple_gforce_analysis(
-                st.session_state.track_x, 
-                st.session_state.track_y, 
-                initial_speed=initial_speed
-            )
-    
-    with col4:
-        st.markdown("**G-Force Analysis**")
+        time_max = accel_df['Time'].max()
         
-        if 'accel_df' in st.session_state:
-            accel_df = st.session_state.accel_df
-            
-            # Create subplots for each G-force
-            fig_g = make_subplots(
-                rows=3, cols=1,
-                subplot_titles=("Vertical G-Forces", "Lateral G-Forces", "Longitudinal G-Forces"),
-                vertical_spacing=0.12
-            )
-            
-            time_max = accel_df['Time'].max()
-            
-            # Vertical G-forces with safety zones
-            fig_g.add_trace(
-                go.Scatter(x=accel_df['Time'], y=accel_df['Vertical'],
-                          name='Vertical', line=dict(color='red', width=2)),
-                row=1, col=1
-            )
-            # Safety zones for vertical
-            fig_g.add_hrect(y0=5, y1=10, fillcolor="red", opacity=0.1, 
-                           annotation_text="Dangerous", annotation_position="top left",
-                           row=1, col=1)
-            fig_g.add_hrect(y0=3, y1=5, fillcolor="orange", opacity=0.1,
-                           annotation_text="Intense", annotation_position="top left",
-                           row=1, col=1)
-            fig_g.add_hrect(y0=-3, y1=-10, fillcolor="red", opacity=0.1,
-                           annotation_text="Dangerous", annotation_position="bottom left",
-                           row=1, col=1)
-            fig_g.add_hrect(y0=-2, y1=-3, fillcolor="orange", opacity=0.1,
-                           annotation_text="High", annotation_position="bottom left",
-                           row=1, col=1)
-            
-            # Lateral G-forces with safety zones
-            fig_g.add_trace(
-                go.Scatter(x=accel_df['Time'], y=accel_df['Lateral'],
-                          name='Lateral', line=dict(color='blue', width=2)),
-                row=2, col=1
-            )
-            fig_g.add_hrect(y0=2, y1=10, fillcolor="orange", opacity=0.1,
-                           annotation_text="Uncomfortable", annotation_position="top left",
-                           row=2, col=1)
-            fig_g.add_hrect(y0=-2, y1=-10, fillcolor="orange", opacity=0.1,
-                           annotation_text="Uncomfortable", annotation_position="bottom left",
-                           row=2, col=1)
-            fig_g.add_hrect(y0=5, y1=10, fillcolor="red", opacity=0.15,
-                           row=2, col=1)
-            fig_g.add_hrect(y0=-5, y1=-10, fillcolor="red", opacity=0.15,
-                           row=2, col=1)
-            
-            # Longitudinal G-forces
-            fig_g.add_trace(
-                go.Scatter(x=accel_df['Time'], y=accel_df['Longitudinal'],
-                          name='Longitudinal', line=dict(color='green', width=2)),
-                row=3, col=1
-            )
-            fig_g.add_hrect(y0=3, y1=10, fillcolor="orange", opacity=0.1,
-                           annotation_text="Intense", annotation_position="top left",
-                           row=3, col=1)
-            fig_g.add_hrect(y0=-3, y1=-10, fillcolor="orange", opacity=0.1,
-                           annotation_text="Intense", annotation_position="bottom left",
-                           row=3, col=1)
-            
-            # Add zero lines
-            for i in range(1, 4):
-                fig_g.add_hline(y=0, line_dash="dash", line_color="gray", row=i, col=1)
-            
-            fig_g.update_xaxes(title_text="Time (s)", row=3, col=1)
-            fig_g.update_yaxes(title_text="G", row=2, col=1)
-            
-            fig_g.update_layout(
-                height=500,
-                showlegend=False,
-                margin=dict(l=20, r=20, t=50, b=20)
-            )
-            
-            st.plotly_chart(fig_g, use_container_width=True)
+        # Vertical G-forces with safety zones
+        fig_g.add_trace(
+            go.Scatter(x=accel_df['Time'], y=accel_df['Vertical'],
+                      name='Vertical', line=dict(color='red', width=2)),
+            row=1, col=1
+        )
+        # Safety zones for vertical
+        fig_g.add_hrect(y0=5, y1=10, fillcolor="red", opacity=0.1, 
+                       annotation_text="Dangerous", annotation_position="top left",
+                       row=1, col=1)
+        fig_g.add_hrect(y0=3, y1=5, fillcolor="orange", opacity=0.1,
+                       annotation_text="Intense", annotation_position="top left",
+                       row=1, col=1)
+        fig_g.add_hrect(y0=-3, y1=-10, fillcolor="red", opacity=0.1,
+                       annotation_text="Dangerous", annotation_position="bottom left",
+                       row=1, col=1)
+        fig_g.add_hrect(y0=-2, y1=-3, fillcolor="orange", opacity=0.1,
+                       annotation_text="High", annotation_position="bottom left",
+                       row=1, col=1)
+        
+        # Lateral G-forces with safety zones
+        fig_g.add_trace(
+            go.Scatter(x=accel_df['Time'], y=accel_df['Lateral'],
+                      name='Lateral', line=dict(color='blue', width=2)),
+            row=2, col=1
+        )
+        fig_g.add_hrect(y0=2, y1=10, fillcolor="orange", opacity=0.1,
+                       annotation_text="Uncomfortable", annotation_position="top left",
+                       row=2, col=1)
+        fig_g.add_hrect(y0=-2, y1=-10, fillcolor="orange", opacity=0.1,
+                       annotation_text="Uncomfortable", annotation_position="bottom left",
+                       row=2, col=1)
+        fig_g.add_hrect(y0=5, y1=10, fillcolor="red", opacity=0.15,
+                       row=2, col=1)
+        fig_g.add_hrect(y0=-5, y1=-10, fillcolor="red", opacity=0.15,
+                       row=2, col=1)
+        
+        # Longitudinal G-forces
+        fig_g.add_trace(
+            go.Scatter(x=accel_df['Time'], y=accel_df['Longitudinal'],
+                      name='Longitudinal', line=dict(color='green', width=2)),
+            row=3, col=1
+        )
+        fig_g.add_hrect(y0=3, y1=10, fillcolor="orange", opacity=0.1,
+                       annotation_text="Intense", annotation_position="top left",
+                       row=3, col=1)
+        fig_g.add_hrect(y0=-3, y1=-10, fillcolor="orange", opacity=0.1,
+                       annotation_text="Intense", annotation_position="bottom left",
+                       row=3, col=1)
+        
+        # Add zero lines
+        for i in range(1, 4):
+            fig_g.add_hline(y=0, line_dash="dash", line_color="gray", row=i, col=1)
+        
+        fig_g.update_xaxes(title_text="Time (s)", row=3, col=1)
+        fig_g.update_yaxes(title_text="G", row=2, col=1)
+        
+        fig_g.update_layout(
+            height=500,
+            showlegend=False,
+            margin=dict(l=20, r=20, t=50, b=20)
+        )
+        
+        st.plotly_chart(fig_g, use_container_width=True)
     
     st.divider()
     
