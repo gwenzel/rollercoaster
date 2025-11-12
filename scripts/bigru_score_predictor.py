@@ -581,10 +581,11 @@ class CoasterScorePredictor:
         # PyTorch 2.6+ requires weights_only=False for loading scalers
         checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
         
-        self.input_size = checkpoint['input_size']
-        self.seq_length = checkpoint['seq_length']
-        self.scaler_accel = checkpoint['scaler_accel']
-        self.scaler_score = checkpoint['scaler_score']
+        # Handle old model format that may not have input_size saved
+        self.input_size = checkpoint.get('input_size', 3)  # Default to 3 features (x, y, z)
+        self.seq_length = checkpoint.get('seq_length', 100)  # Default sequence length
+        self.scaler_accel = checkpoint.get('scaler_accel', StandardScaler())
+        self.scaler_score = checkpoint.get('scaler_score', StandardScaler())
         
         # Rebuild model
         self.model = BiGRUScorePredictor(input_size=self.input_size).to(self.device)
@@ -592,8 +593,10 @@ class CoasterScorePredictor:
         self.model.eval()
         
         print(f"Model loaded from {model_path}")
-        print(f"  Val loss at save: {checkpoint['val_loss']:.4f}")
-        print(f"  Epoch: {checkpoint['epoch']}")
+        if 'val_loss' in checkpoint:
+            print(f"  Val loss at save: {checkpoint['val_loss']:.4f}")
+        if 'epoch' in checkpoint:
+            print(f"  Epoch: {checkpoint['epoch']}")
 
 
 if __name__ == "__main__":
