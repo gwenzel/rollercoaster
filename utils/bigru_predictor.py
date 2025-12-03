@@ -30,31 +30,116 @@ class StreamlitBiGRUPredictor:
         self._load_model()
     
     def _load_model(self):
-        """Load the trained model."""
+        """Load the trained model from notebook-generated format."""
         if not os.path.exists(self.model_path):
             raise FileNotFoundError(
                 f"Model file not found: {self.model_path}\n"
-                "Please train a model first using train_bigru_model.py or "
-                "create a dummy model using create_dummy_model.py"
+                "Please train a model first using the BiGRU notebook"
             )
         
-        # Create predictor without data paths (we'll only use it for inference)
-        # Use name_mapping_module=None to skip the import that causes the error
+        import torch
+        import torch.nn as nn
+        import pickle
+        from sklearn.preprocessing import StandardScaler
+        
+        # Load checkpoint
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        checkpoint = torch.load(self.model_path, map_location=device, weights_only=False)
+        
+        # Define the notebook's BiGRU model architecture
+        class BiGRURegressor(nn.Module):
+            def __init__(self, input_size_accel=3, input_size_airtime=4, hidden_size=256, num_layers=2, dropout=0.3):
+                super(BiGRURegressor, self).__init__()
+                self.gru = nn.GRU(
+                    input_size=input_size_accel,
+                    hidden_size=hidden_size,
+                    num_layers=num_layers,
+                    batch_first=True,
+                    dropout=dropout if num_layers > 1 else 0,
+                    bidirectional=True
+                )
+                self.airtime_head = nn.Sequential(
+                    nn.Linear(input_size_airtime, 256),
+                    nn.ReLU(),
+                    nn.Dropout(dropout)
+                )
+                combined_size = hidden_size * 2 + 256
+                self.head = nn.Sequential(
+                    nn.Linear(combined_size, 512),
+                    nn.ReLU(),
+                    nn.Dropout(dropout),
+                    nn.Linear(512, 256),
+                    nn.ReLU(),
+                    nn.Dropout(dropout),
+                    nn.Linear(256, 1)
+                )
+            
+            def forward(self, x_accel, x_airtime):
+                _, h_n = self.gru(x_accel)
+                h_forward = h_n[-2, :, :]
+                h_backward = h_n[-1, :, :]
+                gru_out = torch.cat((h_forward, h_backward), dim=1)
+                airtime_out = self.airtime_head(x_airtime)
+                combined = torch.cat((gru_out, airtime_out), dim=1)
+                output = self.head(combined)
+                return output
+        
+        # Create a minimal predictor object to hold the model
+        class MinimalPredictor:
+            def __init__(self):
+                self.device = device
+                self.model = None
+                self.scaler_accel = None
+                self.scaler_score = None
+                self.input_size = 3
+                self.seq_length = 100
+        
+        self.predictor = MinimalPredictor()
+        
+        # Try to load scalers from pickle files (notebook format)
         try:
-            self.predictor = CoasterScorePredictor(
-                accel_data_dir="accel_data",  # Not used for inference
-                ratings_data_path="ratings_data/dummy.csv",  # Not used for inference
-                name_mapping_module=None  # Skip name mapping for inference-only mode
-            )
-        except TypeError:
-            # Fallback for older version without name_mapping_module parameter
-            self.predictor = CoasterScorePredictor(
-                accel_data_dir="accel_data",
-                ratings_data_path="ratings_data/dummy.csv"
-            )
+            with open('scaler_airtime.pkl', 'rb') as f:
+                self.predictor.scaler_accel = pickle.load(f)
+            with open('scaler_ratings.pkl', 'rb') as f:
+                self.predictor.scaler_score = pickle.load(f)
+            print("✓ Loaded scalers from pickle files")
+        except FileNotFoundError:
+            # Fallback: try to get scalers from checkpoint
+            self.predictor.scaler_accel = checkpoint.get('scaler_accel', None)
+            self.predictor.scaler_score = checkpoint.get('scaler_score', None)
+            
+            # If still None, create dummy fitted scalers
+            if self.predictor.scaler_accel is None:
+                self.predictor.scaler_accel = StandardScaler()
+                # Fit with dummy data similar to typical acceleration data
+                dummy_accel = np.random.randn(1000, 3)
+                dummy_accel[:, 0] *= 0.5  # Lateral
+                dummy_accel[:, 1] = dummy_accel[:, 1] * 0.5 + 1.0  # Vertical (centered at 1g)
+                dummy_accel[:, 2] *= 0.3  # Longitudinal
+                self.predictor.scaler_accel.fit(dummy_accel)
+                print("⚠ Created fitted scaler for acceleration (using dummy data)")
+            
+            if self.predictor.scaler_score is None:
+                self.predictor.scaler_score = StandardScaler()
+                # Fit with typical coaster rating range (3.0-5.0)
+                dummy_scores = np.random.uniform(3.0, 5.0, size=(100, 1))
+                self.predictor.scaler_score.fit(dummy_scores)
+                print("⚠ Created fitted scaler for ratings (using dummy data)")
         
-        # Load the trained model
-        self.predictor.load_model(self.model_path)
+        # Get model parameters
+        self.predictor.input_size = checkpoint.get('input_size', 3)
+        self.predictor.seq_length = checkpoint.get('seq_length', 100)
+        
+        # Create and load model with notebook architecture
+        self.predictor.model = BiGRURegressor().to(device)
+        self.predictor.model.load_state_dict(checkpoint['model_state_dict'])
+        self.predictor.model.eval()
+        
+        print(f"✓ Model loaded from {self.model_path}")
+        if 'val_loss' in checkpoint:
+            print(f"  Validation loss: {checkpoint['val_loss']:.4f}")
+        if 'epoch' in checkpoint:
+            print(f"  Epoch: {checkpoint['epoch']}")
     
     def predict_from_track(self, track_df: pd.DataFrame) -> float:
         """
@@ -90,12 +175,32 @@ class StreamlitBiGRUPredictor:
         
         # Predict using the model
         try:
-            predicted_score = self.predictor.predict(acceleration_data)
+            import torch
+            
+            # Normalize acceleration data
+            accel_normalized = self.predictor.scaler_accel.transform(acceleration_data)
+            
+            # Convert to tensor and add batch dimension
+            accel_tensor = torch.FloatTensor(accel_normalized).unsqueeze(0).to(self.predictor.device)
+            
+            # Create dummy airtime features (4 features as per model architecture)
+            # In a full implementation, these would be calculated from the track
+            airtime_features = np.zeros((1, 4))
+            airtime_tensor = torch.FloatTensor(airtime_features).to(self.predictor.device)
+            
+            # Run prediction
+            with torch.no_grad():
+                prediction_normalized = self.predictor.model(accel_tensor, airtime_tensor)
+            
+            # Denormalize prediction
+            prediction = self.predictor.scaler_score.inverse_transform(
+                prediction_normalized.cpu().numpy().reshape(-1, 1)
+            )[0, 0]
             
             # Clip to reasonable range (models can sometimes predict outside training range)
-            predicted_score = np.clip(predicted_score, 1.0, 5.0)
+            predicted_score = np.clip(prediction, 1.0, 5.0)
             
-            return predicted_score
+            return float(predicted_score)
         except Exception as e:
             print(f"Error during prediction: {e}")
             import traceback

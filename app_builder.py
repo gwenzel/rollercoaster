@@ -71,13 +71,32 @@ class TrackBlock:
         return self.base_profile_func(**params)
 
 def lift_hill_profile(length=50, height=40, **kwargs):
-    """Gradual lift to initial height - can be steep (chain lift)"""
-    x = np.linspace(0, length, int(length/2))
+    """Gradual lift to initial height with smooth leveling at top"""
     # Allow steep climb for lift hill (up to 45° angle)
-    # This means height can approach length * tan(45°) = length
     max_realistic_height = length * 0.8  # 38° max
     actual_height = min(height, max_realistic_height)
-    y = np.linspace(0, actual_height, len(x))
+    
+    # Entry section: gradual start (15% of length)
+    entry_length = length * 0.15
+    x_entry = np.linspace(0, entry_length, 12)
+    entry_progress = x_entry / entry_length
+    y_entry = actual_height * entry_progress ** 2 * 0.1
+    
+    # Main climb section: steady climb (60% of length)
+    main_length = length * 0.6
+    x_main = np.linspace(entry_length, entry_length + main_length, int(main_length/2))
+    main_progress = (x_main - entry_length) / main_length
+    y_main = actual_height * (0.1 + main_progress * 0.75)
+    
+    # Exit section: smooth leveling at top (25% of length for gentle flattening)
+    exit_length = length * 0.25
+    x_exit = np.linspace(entry_length + main_length, length, 15)
+    exit_progress = (x_exit - entry_length - main_length) / exit_length
+    # Use cubic easing for very smooth leveling
+    y_exit = actual_height * (0.85 + 0.15 * (1 - (1 - exit_progress) ** 3))
+    
+    x = np.concatenate([x_entry, x_main, x_exit])
+    y = np.concatenate([y_entry, y_main, y_exit])
     return x, y
 
 def vertical_drop_profile(height=40, steepness=0.9, **kwargs):
@@ -99,31 +118,159 @@ def vertical_drop_profile(height=40, steepness=0.9, **kwargs):
     return x, y
 
 def loop_profile(diameter=30, **kwargs):
-    """Vertical loop"""
-    theta = np.linspace(0, 2*np.pi, 50)
+    """Clothoid loop - numerically integrated for perfect closure and smoothness"""
     r = diameter / 2
-    x = r * (1 - np.cos(theta))
-    y = r * (1 + np.sin(theta))
+    # Transition length: how long the entry/exit clothoids are
+    # Longer = smoother G-force transition but wider loop
+    transition_length = r * 1.6 
+    
+    # Clothoid parameter A^2 = R * L
+    a_squared = r * transition_length
+    
+    # --- 1. Entry Clothoid ---
+    n_trans = 50
+    ds = transition_length / (n_trans - 1)
+    s_entry = np.linspace(0, transition_length, n_trans)
+    
+    # Curvature k(s) = s / A^2
+    # Angle theta(s) = s^2 / (2 * A^2)
+    theta_entry = s_entry**2 / (2 * a_squared)
+    
+    # Integrate to get X, Y
+    # dx = cos(theta) ds, dy = sin(theta) ds
+    x_entry = np.zeros(n_trans)
+    y_entry = np.zeros(n_trans)
+    
+    # Cumulative sum for integration (trapezoidal rule approximation)
+    # Start at 0,0
+    for i in range(1, n_trans):
+        avg_theta = (theta_entry[i] + theta_entry[i-1]) / 2
+        x_entry[i] = x_entry[i-1] + np.cos(avg_theta) * ds
+        y_entry[i] = y_entry[i-1] + np.sin(avg_theta) * ds
+        
+    # State at end of entry
+    final_entry_angle = theta_entry[-1]
+    final_entry_x = x_entry[-1]
+    final_entry_y = y_entry[-1]
+    
+    # --- 2. Circular Loop ---
+    # The circle must span from entry_angle to (2*pi - entry_angle)
+    # This ensures the loop is symmetric and closes properly
+    start_angle = final_entry_angle - np.pi/2  # Adjust for standard circle parameterization
+    end_angle = (2 * np.pi - final_entry_angle) - np.pi/2
+    
+    n_loop = 80
+    theta_circle = np.linspace(start_angle, end_angle, n_loop)
+    
+    # Calculate center of the circle
+    # At end of entry, we are at (final_entry_x, final_entry_y) with tangent final_entry_angle
+    # The center is perpendicular to the tangent
+    center_x = final_entry_x - r * np.sin(final_entry_angle)
+    center_y = final_entry_y + r * np.cos(final_entry_angle)
+    
+    x_loop = center_x + r * np.cos(theta_circle)
+    y_loop = center_y + r * np.sin(theta_circle)
+    
+    # --- 3. Exit Clothoid ---
+    # Symmetric to entry, but descending
+    # We can construct it by mirroring the entry clothoid
+    
+    x_exit = np.zeros(n_trans)
+    y_exit = np.zeros(n_trans)
+    
+    # Start where loop ends
+    x_exit[0] = x_loop[-1]
+    y_exit[0] = y_loop[-1]
+    
+    # We can just reverse the entry integration steps
+    # The path is symmetric.
+    
+    for i in range(1, n_trans):
+        # We are moving along the clothoid in reverse (curvature decreasing)
+        # s goes from L to 0.
+        s_curr = transition_length - i * ds
+        s_prev = transition_length - (i-1) * ds
+        
+        theta_curr = s_curr**2 / (2 * a_squared)
+        theta_prev = s_prev**2 / (2 * a_squared)
+        
+        avg_theta = (theta_curr + theta_prev) / 2
+        
+        # We are moving forward in X, but angle is negative (downward)
+        # Angle is 2*pi - theta, or just -theta
+        x_exit[i] = x_exit[i-1] + np.cos(-avg_theta) * ds
+        y_exit[i] = y_exit[i-1] + np.sin(-avg_theta) * ds
+
+    # Combine
+    x = np.concatenate([x_entry, x_loop, x_exit])
+    y = np.concatenate([y_entry, y_loop, y_exit])
+    
+    # Force exact return to y=0 (correct small integration drift)
+    y = y - np.linspace(0, y[-1], len(y))
+    
     return x, y
 
 def airtime_hill_profile(length=40, height=15, **kwargs):
-    """Gentle hill for airtime - enforces safe angles"""
+    """Gentle hill for airtime - long and smooth with gradual curves"""
     # Ensure we don't exceed 30° on the way up
-    # For a sine wave, max slope is at x=0, slope = (π*height/length)
-    # To keep max angle < 30°: height/length < tan(30°) ≈ 0.577
     max_safe_height = length * 0.5  # Conservative for smooth sine
     actual_height = min(height, max_safe_height)
     
-    x = np.linspace(0, length, 30)
-    y = actual_height * np.sin(np.pi * x / length)
+    # Use more points for smoother curves
+    # Entry section: very gradual approach (35% of length)
+    entry_length = length * 0.35
+    x_entry = np.linspace(0, entry_length, 20)
+    # Very smooth cubic entry that starts flat
+    entry_progress = x_entry / entry_length
+    y_entry = actual_height * entry_progress ** 3 * 0.3
+    
+    # Main hill section: gentle parabolic peak (30% of length)
+    main_length = length * 0.3
+    x_main = np.linspace(entry_length, entry_length + main_length, 20)
+    main_progress = (x_main - entry_length) / main_length
+    # Smooth parabolic top
+    y_main = actual_height * (0.3 + 0.7 * (1 - (2 * main_progress - 1) ** 2))
+    
+    # Exit section: very gradual descent back to starting level (35% of length)
+    exit_length = length * 0.35
+    x_exit = np.linspace(entry_length + main_length, length, 20)
+    exit_progress = (x_exit - (entry_length + main_length)) / exit_length
+    # Very smooth cubic exit
+    y_exit = actual_height * (1 - exit_progress) ** 3 * 0.3
+    
+    x = np.concatenate([x_entry, x_main, x_exit])
+    y = np.concatenate([y_entry, y_main, y_exit])
     return x, y
 
 def spiral_profile(diameter=25, turns=1.5, **kwargs):
-    """Horizontal spiral/helix"""
-    theta = np.linspace(0, turns * 2 * np.pi, 60)
+    """Horizontal spiral/helix with extended entry/exit sections"""
     r = diameter / 2
-    x = np.linspace(0, diameter * turns * 0.8, len(theta))
-    y = 5 + 3 * np.sin(theta)  # Small height variation
+    total_length = diameter * turns * 0.8
+    
+    # Entry section: gradual banking into spiral (20% of total)
+    entry_length = total_length * 0.2
+    n_entry = 12
+    x_entry = np.linspace(0, entry_length, n_entry)
+    theta_entry = np.linspace(0, 0.3 * np.pi, n_entry)
+    y_entry = 5 + 3 * np.sin(theta_entry) * (x_entry / entry_length) ** 2
+    
+    # Main spiral section (60% of total)
+    main_length = total_length * 0.6
+    n_main = 40
+    x_main = np.linspace(entry_length, entry_length + main_length, n_main)
+    theta_main = np.linspace(0.3 * np.pi, (turns * 2 - 0.3) * np.pi, n_main)
+    y_main = 5 + 3 * np.sin(theta_main)
+    
+    # Exit section: gradual leveling out (20% of total)
+    exit_length = total_length * 0.2
+    n_exit = 12
+    x_exit = np.linspace(entry_length + main_length, total_length, n_exit)
+    theta_exit = np.linspace((turns * 2 - 0.3) * np.pi, turns * 2 * np.pi, n_exit)
+    exit_progress = (x_exit - (entry_length + main_length)) / exit_length
+    y_exit = 5 + 3 * np.sin(theta_exit) * (1 - exit_progress) ** 2
+    
+    x = np.concatenate([x_entry, x_main, x_exit])
+    y = np.concatenate([y_entry, y_main, y_exit])
     return x, y
 
 def banked_turn_profile(radius=30, angle=90, **kwargs):
@@ -153,7 +300,7 @@ def flat_section_profile(length=30, **kwargs):
 BLOCK_LIBRARY = {
     "lift_hill": TrackBlock("Lift Hill", "Chain lift to initial height", "⛰️", lift_hill_profile),
     "drop": TrackBlock("Vertical Drop", "Steep initial drop", "⬇️", vertical_drop_profile),
-    "loop": TrackBlock("Vertical Loop", "Classic loop element", "🔄", loop_profile),
+    "loop": TrackBlock("Clothoid Loop", "Smooth clothoid loop element", "🔄", loop_profile),
     "airtime_hill": TrackBlock("Airtime Hill", "Floater airtime moment", "🎈", airtime_hill_profile),
     "spiral": TrackBlock("Spiral", "Helix/corkscrew element", "🌀", spiral_profile),
     "bunny_hop": TrackBlock("Bunny Hop", "Quick airtime bump", "🐰", bunny_hop_profile),
@@ -165,36 +312,48 @@ BLOCK_LIBRARY = {
 # SESSION STATE INITIALIZATION
 # ============================================================================
 
+# Always initialize with default template
 if 'track_sequence' not in st.session_state:
-    # Start with a default template
+    st.session_state.track_sequence = []
+
+if 'track_generated' not in st.session_state:
+    st.session_state.track_generated = False
+
+# Always start with default curve on first load
+if 'initialized' not in st.session_state:
     st.session_state.track_sequence = [
         {
             'type': 'lift_hill',
             'block': BLOCK_LIBRARY['lift_hill'],
-            'params': {'length': 50, 'height': 40}
-        },
-        {
-            'type': 'drop',
-            'block': BLOCK_LIBRARY['drop'],
-            'params': {'height': 40, 'steepness': 0.9, 'current_height': 40}
-        },
-        {
-            'type': 'loop',
-            'block': BLOCK_LIBRARY['loop'],
-            'params': {'diameter': 30}
+            'params': {'length': 60, 'height': 35}
         },
         {
             'type': 'airtime_hill',
             'block': BLOCK_LIBRARY['airtime_hill'],
-            'params': {'length': 40, 'height': 15}
+            'params': {'length': 45, 'height': 12}
+        },
+        {
+            'type': 'bunny_hop',
+            'block': BLOCK_LIBRARY['bunny_hop'],
+            'params': {'length': 25, 'height': 6}
+        },
+        {
+            'type': 'bunny_hop',
+            'block': BLOCK_LIBRARY['bunny_hop'],
+            'params': {'length': 20, 'height': 5}
+        },
+        {
+            'type': 'airtime_hill',
+            'block': BLOCK_LIBRARY['airtime_hill'],
+            'params': {'length': 40, 'height': 10}
         },
         {
             'type': 'flat_section',
             'block': BLOCK_LIBRARY['flat_section'],
-            'params': {'length': 30}
+            'params': {'length': 25}
         }
     ]
-if 'track_generated' not in st.session_state:
+    st.session_state.initialized = True
     st.session_state.track_generated = False
 
 # ============================================================================
@@ -612,7 +771,7 @@ def detect_curvature_spikes(x, y, threshold=2.0):
     return spike_indices, curvature
 
 def generate_track_from_blocks():
-    """Generate complete track from block sequence with joint smoothing and spike detection"""
+    """Generate complete track from block sequence with joint-only smoothing"""
     all_x = []
     all_y = []
     block_boundaries = []  # Track where blocks join
@@ -638,30 +797,15 @@ def generate_track_from_blocks():
     all_x = np.array(all_x)
     all_y = np.array(all_y)
     
-    # Step 1: Smooth joints with moving average to prevent spikes (light smoothing)
-    all_x, all_y = smooth_joints(all_x, all_y, block_boundaries, window_size=5)  # Reduced from 7 to 5
-    
-    # Step 2: Detect any remaining curvature spikes (higher threshold = less aggressive)
-    spike_indices, curvature = detect_curvature_spikes(all_x, all_y, threshold=4.0)  # Increased from 3.0 to 4.0
-    
-    if len(spike_indices) > 0:
-        # Apply additional smoothing at spike locations
-        all_x, all_y = smooth_joints(all_x, all_y, spike_indices.tolist(), window_size=5)
-        st.session_state.joint_smoothing_applied = f"✓ Smoothed {len(block_boundaries)} joints + {len(spike_indices)} curvature spikes"
-    else:
+    # ONLY smooth at joints - preserve block shapes (especially loops)
+    if len(block_boundaries) > 0:
+        all_x, all_y = smooth_joints(all_x, all_y, block_boundaries, window_size=3)  # Smaller window for minimal smoothing
         st.session_state.joint_smoothing_applied = f"✓ Smoothed {len(block_boundaries)} joints"
-    
-    # Step 3: Check overall smoothness
-    is_valid, max_angle, problem_indices = check_track_smoothness(all_x, all_y)
-    
-    if not is_valid:
-        # Apply moderate smoothing to fix remaining issues
-        all_x, all_y = smooth_track_profile(all_x, all_y, smoothness_factor=0.3)  # Reduced from default
-        st.session_state.smoothness_warning = f"⚠️ Track smoothed to remove vertical sections (max angle was {max_angle:.1f}°)"
     else:
-        # Skip global smoothing if joints already smoothed well
-        # This preserves loop shapes and other features
-        st.session_state.smoothness_warning = None
+        st.session_state.joint_smoothing_applied = "No joints to smooth"
+    
+    # Do NOT apply global smoothing - this distorts loops and other features
+    st.session_state.smoothness_warning = None
     
     # Store curvature data for analysis
     _, final_curvature = detect_curvature_spikes(all_x, all_y)
@@ -818,12 +962,23 @@ if st.session_state.track_generated:
             # Check safety FIRST before showing rating
             safety = check_gforce_safety(accel_df)
             
+            # Always predict rating first
+            predicted_rating = predict_score_bigru(accel_df)
+            st.session_state.predicted_rating = predicted_rating
+            
             if safety['dangers']:
-                # DANGEROUS - Compact warning
-                st.error("🚨 **UNSAFE DESIGN** - This ride would be DANGEROUS to riders!")
-                for danger in safety['dangers']:
-                    st.markdown(f"- {danger}")
-                st.caption("⚠️ Fix safety issues before evaluating ride quality")
+                # DANGEROUS - Show warning AND rating side by side
+                col_danger, col_rate_danger = st.columns([1, 1])
+                with col_danger:
+                    st.error("🚨 **UNSAFE DESIGN**")
+                    for danger in safety['dangers']:
+                        st.caption(danger)
+                    st.caption("⚠️ Fix safety issues")
+                
+                with col_rate_danger:
+                    st.markdown(f'<div style="font-size: 2rem; font-weight: bold; text-align: center; color: #FFD700;">⭐ {predicted_rating:.2f}</div>', 
+                               unsafe_allow_html=True)
+                    st.caption("Rating (if rideable)")
                 
             elif safety['warnings']:
                 # Has warnings - compact format with rating
@@ -834,8 +989,6 @@ if st.session_state.track_generated:
                         st.caption(warning)
                 
                 with col_rate:
-                    predicted_rating = predict_score_bigru(accel_df)
-                    st.session_state.predicted_rating = predicted_rating
                     st.markdown(f'<div style="font-size: 2rem; font-weight: bold; text-align: center; color: #FFD700;">⭐ {predicted_rating:.2f}</div>', 
                                unsafe_allow_html=True)
                     st.caption("⚠️ Has comfort issues")
@@ -843,9 +996,6 @@ if st.session_state.track_generated:
             else:
                 # SAFE - Compact two-column layout
                 col_bucket, col_rating = st.columns([1, 1])
-                
-                predicted_rating = predict_score_bigru(accel_df)
-                st.session_state.predicted_rating = predicted_rating
                 
                 with col_bucket:
                     # Interpretation
