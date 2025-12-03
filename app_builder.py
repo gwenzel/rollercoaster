@@ -70,231 +70,30 @@ class TrackBlock:
         """Generate track profile with given parameters"""
         return self.base_profile_func(**params)
 
-def lift_hill_profile(length=50, height=40, **kwargs):
-    """Gradual lift to initial height with smooth leveling at top"""
-    # Allow steep climb for lift hill (up to 45° angle)
-    max_realistic_height = length * 0.8  # 38° max
-    actual_height = min(height, max_realistic_height)
-    
-    # Entry section: gradual start (15% of length)
-    entry_length = length * 0.15
-    x_entry = np.linspace(0, entry_length, 12)
-    entry_progress = x_entry / entry_length
-    y_entry = actual_height * entry_progress ** 2 * 0.1
-    
-    # Main climb section: steady climb (60% of length)
-    main_length = length * 0.6
-    x_main = np.linspace(entry_length, entry_length + main_length, int(main_length/2))
-    main_progress = (x_main - entry_length) / main_length
-    y_main = actual_height * (0.1 + main_progress * 0.75)
-    
-    # Exit section: smooth leveling at top (25% of length for gentle flattening)
-    exit_length = length * 0.25
-    x_exit = np.linspace(entry_length + main_length, length, 15)
-    exit_progress = (x_exit - entry_length - main_length) / exit_length
-    # Use cubic easing for very smooth leveling
-    y_exit = actual_height * (0.85 + 0.15 * (1 - (1 - exit_progress) ** 3))
-    
-    x = np.concatenate([x_entry, x_main, x_exit])
-    y = np.concatenate([y_entry, y_main, y_exit])
-    return x, y
+from utils.track_blocks import (
+    lift_hill_profile,
+    vertical_drop_profile,
+    loop_profile,
+    airtime_hill_profile,
+    spiral_profile,
+    banked_turn_profile,
+    bunny_hop_profile,
+    flat_section_profile,
+)
 
-def vertical_drop_profile(height=40, steepness=0.9, **kwargs):
-    """Drop - starts from current height, controlled steepness"""
-    current_height = kwargs.get('current_height', height)
-    drop_height = min(height, current_height)  # Can't drop more than current height
-    
-    # Limit steepness to max 30° angle for safety
-    # tan(30°) ≈ 0.577, so horizontal_distance should be at least drop_height / 0.577 ≈ 1.73 * drop_height
-    min_horizontal_distance = drop_height * 1.73  # 30° max
-    
-    # Steepness parameter now means: 0.9 = use minimum distance (30°), 0.5 = use 2x distance (gentler)
-    horizontal_distance = min_horizontal_distance / steepness
-    
-    x = np.linspace(0, horizontal_distance, 30)
-    # Drop from y=0 (connection point) down by drop_height
-    # The offset is applied in generate_track_from_blocks
-    y = np.linspace(0, -drop_height, len(x))
-    return x, y
+""" All element profile functions are imported from utils.track_blocks for cleaner structure """
 
-def loop_profile(diameter=30, **kwargs):
-    """Clothoid loop - numerically integrated for perfect closure and smoothness"""
-    r = diameter / 2
-    # Transition length: how long the entry/exit clothoids are
-    # Longer = smoother G-force transition but wider loop
-    transition_length = r * 1.6 
-    
-    # Clothoid parameter A^2 = R * L
-    a_squared = r * transition_length
-    
-    # --- 1. Entry Clothoid ---
-    n_trans = 50
-    ds = transition_length / (n_trans - 1)
-    s_entry = np.linspace(0, transition_length, n_trans)
-    
-    # Curvature k(s) = s / A^2
-    # Angle theta(s) = s^2 / (2 * A^2)
-    theta_entry = s_entry**2 / (2 * a_squared)
-    
-    # Integrate to get X, Y
-    # dx = cos(theta) ds, dy = sin(theta) ds
-    x_entry = np.zeros(n_trans)
-    y_entry = np.zeros(n_trans)
-    
-    # Cumulative sum for integration (trapezoidal rule approximation)
-    # Start at 0,0
-    for i in range(1, n_trans):
-        avg_theta = (theta_entry[i] + theta_entry[i-1]) / 2
-        x_entry[i] = x_entry[i-1] + np.cos(avg_theta) * ds
-        y_entry[i] = y_entry[i-1] + np.sin(avg_theta) * ds
-        
-    # State at end of entry
-    final_entry_angle = theta_entry[-1]
-    final_entry_x = x_entry[-1]
-    final_entry_y = y_entry[-1]
-    
-    # --- 2. Circular Loop ---
-    # The circle must span from entry_angle to (2*pi - entry_angle)
-    # This ensures the loop is symmetric and closes properly
-    start_angle = final_entry_angle - np.pi/2  # Adjust for standard circle parameterization
-    end_angle = (2 * np.pi - final_entry_angle) - np.pi/2
-    
-    n_loop = 80
-    theta_circle = np.linspace(start_angle, end_angle, n_loop)
-    
-    # Calculate center of the circle
-    # At end of entry, we are at (final_entry_x, final_entry_y) with tangent final_entry_angle
-    # The center is perpendicular to the tangent
-    center_x = final_entry_x - r * np.sin(final_entry_angle)
-    center_y = final_entry_y + r * np.cos(final_entry_angle)
-    
-    x_loop = center_x + r * np.cos(theta_circle)
-    y_loop = center_y + r * np.sin(theta_circle)
-    
-    # --- 3. Exit Clothoid ---
-    # Symmetric to entry, but descending
-    # We can construct it by mirroring the entry clothoid
-    
-    x_exit = np.zeros(n_trans)
-    y_exit = np.zeros(n_trans)
-    
-    # Start where loop ends
-    x_exit[0] = x_loop[-1]
-    y_exit[0] = y_loop[-1]
-    
-    # We can just reverse the entry integration steps
-    # The path is symmetric.
-    
-    for i in range(1, n_trans):
-        # We are moving along the clothoid in reverse (curvature decreasing)
-        # s goes from L to 0.
-        s_curr = transition_length - i * ds
-        s_prev = transition_length - (i-1) * ds
-        
-        theta_curr = s_curr**2 / (2 * a_squared)
-        theta_prev = s_prev**2 / (2 * a_squared)
-        
-        avg_theta = (theta_curr + theta_prev) / 2
-        
-        # We are moving forward in X, but angle is negative (downward)
-        # Angle is 2*pi - theta, or just -theta
-        x_exit[i] = x_exit[i-1] + np.cos(-avg_theta) * ds
-        y_exit[i] = y_exit[i-1] + np.sin(-avg_theta) * ds
+# Profiles now imported from utils.track_blocks
 
-    # Combine
-    x = np.concatenate([x_entry, x_loop, x_exit])
-    y = np.concatenate([y_entry, y_loop, y_exit])
-    
-    # Force exact return to y=0 (correct small integration drift)
-    y = y - np.linspace(0, y[-1], len(y))
-    
-    return x, y
+ 
 
-def airtime_hill_profile(length=40, height=15, **kwargs):
-    """Gentle hill for airtime - long and smooth with gradual curves"""
-    # Ensure we don't exceed 30° on the way up
-    max_safe_height = length * 0.5  # Conservative for smooth sine
-    actual_height = min(height, max_safe_height)
-    
-    # Use more points for smoother curves
-    # Entry section: very gradual approach (35% of length)
-    entry_length = length * 0.35
-    x_entry = np.linspace(0, entry_length, 20)
-    # Very smooth cubic entry that starts flat
-    entry_progress = x_entry / entry_length
-    y_entry = actual_height * entry_progress ** 3 * 0.3
-    
-    # Main hill section: gentle parabolic peak (30% of length)
-    main_length = length * 0.3
-    x_main = np.linspace(entry_length, entry_length + main_length, 20)
-    main_progress = (x_main - entry_length) / main_length
-    # Smooth parabolic top
-    y_main = actual_height * (0.3 + 0.7 * (1 - (2 * main_progress - 1) ** 2))
-    
-    # Exit section: very gradual descent back to starting level (35% of length)
-    exit_length = length * 0.35
-    x_exit = np.linspace(entry_length + main_length, length, 20)
-    exit_progress = (x_exit - (entry_length + main_length)) / exit_length
-    # Very smooth cubic exit
-    y_exit = actual_height * (1 - exit_progress) ** 3 * 0.3
-    
-    x = np.concatenate([x_entry, x_main, x_exit])
-    y = np.concatenate([y_entry, y_main, y_exit])
-    return x, y
+ 
 
-def spiral_profile(diameter=25, turns=1.5, **kwargs):
-    """Horizontal spiral/helix with extended entry/exit sections"""
-    r = diameter / 2
-    total_length = diameter * turns * 0.8
-    
-    # Entry section: gradual banking into spiral (20% of total)
-    entry_length = total_length * 0.2
-    n_entry = 12
-    x_entry = np.linspace(0, entry_length, n_entry)
-    theta_entry = np.linspace(0, 0.3 * np.pi, n_entry)
-    y_entry = 5 + 3 * np.sin(theta_entry) * (x_entry / entry_length) ** 2
-    
-    # Main spiral section (60% of total)
-    main_length = total_length * 0.6
-    n_main = 40
-    x_main = np.linspace(entry_length, entry_length + main_length, n_main)
-    theta_main = np.linspace(0.3 * np.pi, (turns * 2 - 0.3) * np.pi, n_main)
-    y_main = 5 + 3 * np.sin(theta_main)
-    
-    # Exit section: gradual leveling out (20% of total)
-    exit_length = total_length * 0.2
-    n_exit = 12
-    x_exit = np.linspace(entry_length + main_length, total_length, n_exit)
-    theta_exit = np.linspace((turns * 2 - 0.3) * np.pi, turns * 2 * np.pi, n_exit)
-    exit_progress = (x_exit - (entry_length + main_length)) / exit_length
-    y_exit = 5 + 3 * np.sin(theta_exit) * (1 - exit_progress) ** 2
-    
-    x = np.concatenate([x_entry, x_main, x_exit])
-    y = np.concatenate([y_entry, y_main, y_exit])
-    return x, y
+ 
 
-def banked_turn_profile(radius=30, angle=90, **kwargs):
-    """Banked horizontal turn"""
-    theta = np.linspace(0, np.radians(angle), 30)
-    x = radius * np.sin(theta)
-    y = np.ones_like(x) * 5  # Constant height
-    return x, y
+ 
 
-def bunny_hop_profile(length=20, height=8, **kwargs):
-    """Small quick hill - enforces safe angles"""
-    # Bunny hops should be gentle (max 20° for comfort)
-    max_safe_height = length * 0.3  # ~17° max
-    actual_height = min(height, max_safe_height)
-    
-    x = np.linspace(0, length, 15)
-    y = actual_height * np.sin(np.pi * x / length)**2
-    return x, y
-
-def flat_section_profile(length=30, **kwargs):
-    """Flat brake/station section"""
-    x = np.linspace(0, length, 20)
-    y = np.zeros_like(x)
-    return x, y
+ 
 
 # Define all available blocks
 BLOCK_LIBRARY = {
@@ -771,46 +570,73 @@ def detect_curvature_spikes(x, y, threshold=2.0):
     return spike_indices, curvature
 
 def generate_track_from_blocks():
-    """Generate complete track from block sequence with joint-only smoothing"""
+    """Generate complete track from block sequence with cubic joint blending"""
+
+    def estimate_slope(x_arr, y_arr, idx=-1):
+        # Estimate slope at endpoint using last 3 points
+        i = idx if idx >= 2 else len(x_arr) - 1
+        i0 = max(0, i - 2)
+        dx = x_arr[i] - x_arr[i0]
+        dy = y_arr[i] - y_arr[i0]
+        return dy / dx if dx != 0 else 0.0
+
+    def blend_joint(px, py, nx_rel, ny_rel, blend_len=20):
+        # Create a cubic Hermite segment between last prev point and first next point
+        x0, y0 = px[-1], py[-1]
+        x1, y1 = x0 + nx_rel[0], y0 + ny_rel[0]
+        m0 = estimate_slope(px, py)
+        m1 = estimate_slope(nx_rel, ny_rel, idx=1)  # slope near start of next block (relative)
+        t = np.linspace(0, 1, blend_len)
+        h00 = (2*t**3 - 3*t**2 + 1)
+        h10 = (t**3 - 2*t**2 + t)
+        h01 = (-2*t**3 + 3*t**2)
+        h11 = (t**3 - t**2)
+        dx = x1 - x0
+        x_blend = x0 + t * dx
+        y_blend = h00*y0 + h10*(m0*dx) + h01*y1 + h11*(m1*dx)
+        return x_blend, y_blend
+
     all_x = []
     all_y = []
-    block_boundaries = []  # Track where blocks join
-    current_x_offset = 0
-    current_y_offset = 0
-    
+    current_x_offset = 0.0
+    current_y_offset = 0.0
+    joints_count = 0
+
     for idx, block_info in enumerate(st.session_state.track_sequence):
-        x, y = block_info['block'].generate_profile(**block_info['params'])
-        
-        # Record joint location (before adding new block)
-        if idx > 0:
-            block_boundaries.append(len(all_x))
-        
-        # Offset to connect blocks
-        all_x.extend(x + current_x_offset)
-        all_y.extend(y + current_y_offset)
-        
-        # Update offsets for next block
+        x_rel, y_rel = block_info['block'].generate_profile(**block_info['params'])
+
+        if idx == 0:
+            # First block: just place
+            all_x.extend(x_rel + current_x_offset)
+            all_y.extend(y_rel + current_y_offset)
+            current_x_offset = all_x[-1]
+            current_y_offset = all_y[-1]
+            continue
+
+        # Before appending next block, insert a blend segment to match slopes
+        x_blend, y_blend = blend_joint(np.array(all_x), np.array(all_y), np.array(x_rel), np.array(y_rel))
+
+        # Append blend (avoid duplicating endpoint)
+        all_x.extend(x_blend[1:].tolist())
+        all_y.extend(y_blend[1:].tolist())
+        joints_count += 1
+
+        # Now append the next block offset from last absolute point
+        x_abs = x_rel + all_x[-1]
+        y_abs = y_rel + all_y[-1]
+        all_x.extend(x_abs.tolist())
+        all_y.extend(y_abs.tolist())
+
         current_x_offset = all_x[-1]
         current_y_offset = all_y[-1]
-    
-    # Convert to arrays
+
     all_x = np.array(all_x)
     all_y = np.array(all_y)
-    
-    # ONLY smooth at joints - preserve block shapes (especially loops)
-    if len(block_boundaries) > 0:
-        all_x, all_y = smooth_joints(all_x, all_y, block_boundaries, window_size=3)  # Smaller window for minimal smoothing
-        st.session_state.joint_smoothing_applied = f"✓ Smoothed {len(block_boundaries)} joints"
-    else:
-        st.session_state.joint_smoothing_applied = "No joints to smooth"
-    
-    # Do NOT apply global smoothing - this distorts loops and other features
+
+    st.session_state.joint_smoothing_applied = f"✓ Blended {joints_count} joints (cubic)"
     st.session_state.smoothness_warning = None
-    
-    # Store curvature data for analysis
     _, final_curvature = detect_curvature_spikes(all_x, all_y)
     st.session_state.track_curvature = final_curvature
-    
     return all_x, all_y
 
 def simple_gforce_analysis(x, y, initial_speed=15.0, dt=0.1):
