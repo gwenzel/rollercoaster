@@ -15,7 +15,7 @@ import os
 # Import utilities
 from utils.accelerometer_transform import track_to_accelerometer_data
 from utils.bigru_predictor import predict_score_bigru
-from utils.track_library import ensure_library, pick_random_entry, load_entry
+from utils.track_library import ensure_library, pick_random_entry, load_entry, add_entry
 
 st.set_page_config(
     page_title="Roller Coaster Builder",
@@ -82,18 +82,6 @@ from utils.track_blocks import (
     flat_section_profile,
 )
 
-""" All element profile functions are imported from utils.track_blocks for cleaner structure """
-
-# Profiles now imported from utils.track_blocks
-
- 
-
- 
-
- 
-
- 
-
  
 
 # Define all available blocks
@@ -123,14 +111,14 @@ if 'track_generated' not in st.session_state:
 if 'initialized' not in st.session_state:
     st.session_state.track_sequence = [
         {
-            'type': 'lift_hill',
-            'block': BLOCK_LIBRARY['lift_hill'],
-            'params': {'length': 40, 'height': 35}
-        },
-        {
             'type': 'drop',
             'block': BLOCK_LIBRARY['drop'],
-            'params': {'height': 30, 'steepness': 0.8}
+            'params': {'height': 30, 'steepness': 0.85}
+        },
+        {
+            'type': 'flat_section',
+            'block': BLOCK_LIBRARY['flat_section'],
+            'params': {'length': 30}
         },
         {
             'type': 'loop',
@@ -140,7 +128,7 @@ if 'initialized' not in st.session_state:
         {
             'type': 'flat_section',
             'block': BLOCK_LIBRARY['flat_section'],
-            'params': {'length': 30}
+            'params': {'length': 25}
         }
     ]
     st.session_state.initialized = True
@@ -165,20 +153,35 @@ with st.sidebar:
             # Random number of blocks (4-8)
             num_blocks = random.randint(4, 8)
             
-            # Always start with a lift hill
-            new_sequence = [{
-                'type': 'lift_hill',
-                'block': BLOCK_LIBRARY['lift_hill'],
-                'params': {
-                    'length': random.randint(30, 80),
-                    'height': random.randint(30, 60)
+            # Always start with a lift hill followed by a vertical drop and a flat section
+            new_sequence = [
+                {
+                    'type': 'lift_hill',
+                    'block': BLOCK_LIBRARY['lift_hill'],
+                    'params': {
+                        'length': random.randint(30, 80),
+                        'height': random.randint(20, 50)
+                    }
+                },
+                {
+                    'type': 'drop',
+                    'block': BLOCK_LIBRARY['drop'],
+                    'params': {
+                        'height': random.randint(25, 45),
+                        'steepness': random.uniform(0.7, 0.9)
+                    }
+                },
+                {
+                    'type': 'flat_section',
+                    'block': BLOCK_LIBRARY['flat_section'],
+                    'params': {'length': random.randint(20, 40)}
                 }
-            }]
+            ]
             
-            # Available blocks (excluding lift_hill for now)
+            # Available blocks (after initial drop + flat)
             available_blocks = ['drop', 'loop', 'airtime_hill', 'spiral', 'bunny_hop', 'banked_turn']
             
-            for i in range(num_blocks - 2):  # -2 because we have lift_hill and will add flat_section
+            for i in range(num_blocks - 3):  # -3 because we added lift + drop + flat
                 block_type = random.choice(available_blocks)
                 
                 if block_type == 'drop':
@@ -224,6 +227,11 @@ with st.sidebar:
             
             st.session_state.track_sequence = new_sequence
             st.session_state.track_generated = False
+            # Enforce end level equals start for random generation
+            st.session_state.force_end_level = True
+            st.session_state.start_level = 0.0
+            # Enable 3D for random designs
+            st.session_state.random_3d = True
             st.success(f"🎲 Generated random coaster with {num_blocks} blocks!")
             st.rerun()
     
@@ -233,12 +241,17 @@ with st.sidebar:
                 {
                     'type': 'lift_hill',
                     'block': BLOCK_LIBRARY['lift_hill'],
-                    'params': {'length': 40, 'height': 35}
+                    'params': {'length': 50, 'height': 35}
                 },
                 {
                     'type': 'drop',
                     'block': BLOCK_LIBRARY['drop'],
-                    'params': {'height': 30, 'steepness': 0.8}
+                    'params': {'height': 30, 'steepness': 0.85}
+                },
+                {
+                    'type': 'flat_section',
+                    'block': BLOCK_LIBRARY['flat_section'],
+                    'params': {'length': 30}
                 },
                 {
                     'type': 'loop',
@@ -248,28 +261,39 @@ with st.sidebar:
                 {
                     'type': 'flat_section',
                     'block': BLOCK_LIBRARY['flat_section'],
-                    'params': {'length': 30}
+                    'params': {'length': 25}
                 }
             ]
             st.session_state.track_generated = False
+            st.session_state.force_end_level = False
             st.success("🔄 Reset to default template!")
             st.rerun()
 
     # Precomputed safe library
     st.subheader("📚 Precomputed Safe Library")
     try:
+        # Refresh control
+        col_refresh = st.columns([1])[0]
+        if col_refresh.button("🔄 Refresh Library", use_container_width=True):
+            # Re-scan and rebuild metadata if needed, then rerun UI
+            ensure_library(dt=0.02)
+            st.success("Library refreshed")
+            st.rerun()
+
         library_entries = ensure_library(dt=0.02)
-        col_lib1, col_lib2 = st.columns(2)
-        with col_lib1:
-            if st.button("🎲 Load Random Precomputed", use_container_width=True):
-                entry = pick_random_entry(library_entries)
+        names = [e['name'] for e in library_entries] if library_entries else []
+        selected_name = st.selectbox("Select saved design", options=names, index=0 if names else None)
+        if st.button("📦 Load + Apply Selected", use_container_width=True) and selected_name:
+            entry = next((e for e in library_entries if e['name'] == selected_name), None)
+            if entry:
+                # Load geometry + physics
                 geo, phys = load_entry(entry)
                 pts = geo['points']
-                # Set current track geometry
                 st.session_state.track_x = pts[:,0]
                 st.session_state.track_y = pts[:,1]
+                if pts.shape[1] >= 3:
+                    st.session_state.track_z = pts[:,2].tolist()
                 st.session_state.track_generated = True
-                # Build accelerometer dataframe expected by the UI
                 n = pts.shape[0]
                 dt = 0.02
                 time = np.arange(n) * dt
@@ -280,28 +304,42 @@ with st.sidebar:
                     'Longitudinal': phys['f_long_g'],
                 })
                 st.session_state.accel_df = accel_df
-                st.success(f"Loaded precomputed track: {entry['name']}")
+
+                # Apply elements to builder for editing
+                st.session_state.track_sequence = [
+                    {
+                        'type': e['type'],
+                        'block': BLOCK_LIBRARY[e['type'] if e['type'] in BLOCK_LIBRARY else 'flat_section'],
+                        'params': e['params']
+                    }
+                    for e in entry.get('elements', [])
+                ]
+                st.success(f"Loaded and applied: {entry['name']}")
                 st.rerun()
-        with col_lib2:
-            if st.button("🗂️ Use Library Default", use_container_width=True):
-                # Set default to the first library entry's elements
-                if library_entries:
-                    st.session_state.track_sequence = [
-                        {
-                            'type': e['type'],
-                            'block': BLOCK_LIBRARY[e['type'] if e['type'] in BLOCK_LIBRARY else 'flat_section'],
-                            'params': e['params']
-                        }
-                        for e in library_entries[0]['elements']
-                    ]
-                    st.session_state.track_generated = False
-                    st.success("Applied library default template")
-                    st.rerun()
     except Exception as _lib_e:
         st.caption("Library unavailable; continuing without precomputed tracks.")
     
     st.divider()
     
+    # Save current design to precomputed library
+    st.subheader("💾 Save Design")
+    new_lib_name = st.text_input("Entry name", value="my_design")
+    if st.button("📚 Add Design to Library", use_container_width=True, help="Save current track with physics to the library"):
+        if st.session_state.get('track_generated'):
+            track_df = pd.DataFrame({
+                'x': st.session_state.track_x,
+                'y': st.session_state.track_y,
+                'z': np.array(st.session_state.get('track_z', np.zeros_like(st.session_state.track_x)))
+            })
+            elements = st.session_state.get('track_sequence', [])
+            meta = add_entry(new_lib_name, elements, track_df)
+            if meta:
+                st.success(f"Saved to library as '{new_lib_name}'")
+            else:
+                st.error("Failed to save to library")
+        else:
+            st.warning("Generate a track first, then save.")
+
     st.markdown("""
     <div style="background-color: #e3f2fd; padding: 0.8rem; border-radius: 0.3rem; margin-bottom: 1rem; color: #1a1a1a;">
     <b style="color: #0d47a1;">Instructions:</b><br>
@@ -596,31 +634,65 @@ def detect_curvature_spikes(x, y, threshold=2.0):
     return spike_indices, curvature
 
 def generate_track_from_blocks():
-    """Generate complete track from block sequence with cubic joint blending"""
+    """Generate complete track from block sequence with improved C1 joint blending.
+    Ensures continuity of position and first derivative in both x and y.
+    """
 
-    def estimate_slope(x_arr, y_arr, idx=-1):
-        # Estimate slope at endpoint using last 3 points
-        i = idx if idx >= 2 else len(x_arr) - 1
-        i0 = max(0, i - 2)
-        dx = x_arr[i] - x_arr[i0]
-        dy = y_arr[i] - y_arr[i0]
-        return dy / dx if dx != 0 else 0.0
+    def endpoint_tangent(x_arr, y_arr, at_start=False):
+        # Compute tangent vector using local finite difference
+        if at_start:
+            i0, i1 = 0, min(1, len(x_arr)-1)
+        else:
+            i1 = len(x_arr)-1
+            i0 = max(0, i1-1)
+        tx = x_arr[i1] - x_arr[i0]
+        ty = y_arr[i1] - y_arr[i0]
+        return tx, ty
 
-    def blend_joint(px, py, nx_rel, ny_rel, blend_len=20):
-        # Create a cubic Hermite segment between last prev point and first next point
-        x0, y0 = px[-1], py[-1]
-        x1, y1 = x0 + nx_rel[0], y0 + ny_rel[0]
-        m0 = estimate_slope(px, py)
-        m1 = estimate_slope(nx_rel, ny_rel, idx=1)  # slope near start of next block (relative)
-        t = np.linspace(0, 1, blend_len)
-        h00 = (2*t**3 - 3*t**2 + 1)
-        h10 = (t**3 - 2*t**2 + t)
-        h01 = (-2*t**3 + 3*t**2)
-        h11 = (t**3 - t**2)
-        dx = x1 - x0
-        x_blend = x0 + t * dx
-        y_blend = h00*y0 + h10*(m0*dx) + h01*y1 + h11*(m1*dx)
-        return x_blend, y_blend
+    def hermite_blend(P0, P1, T0, T1, steps=24):
+        t = np.linspace(0.0, 1.0, steps)
+        h00 = 2*t**3 - 3*t**2 + 1
+        h10 = t**3 - 2*t**2 + t
+        h01 = -2*t**3 + 3*t**2
+        h11 = t**3 - t**2
+        dx = h00*P0[0] + h10*T0[0] + h01*P1[0] + h11*T1[0]
+        dy = h00*P0[1] + h10*T0[1] + h01*P1[1] + h11*T1[1]
+        return dx, dy
+
+    def blend_joint(prev_x, prev_y, next_x_rel, next_y_rel, steps=24):
+        # Absolute endpoints
+        x0, y0 = prev_x[-1], prev_y[-1]
+        x1, y1 = x0 + next_x_rel[0], y0 + next_y_rel[0]
+        # Tangents at endpoints (absolute for prev, relative mapped for next)
+        t0x, t0y = endpoint_tangent(prev_x, prev_y, at_start=False)
+        n_tx, n_ty = endpoint_tangent(next_x_rel, next_y_rel, at_start=True)
+        # Normalize and scale tangents to local segment length for stability
+        seg_len = max(np.hypot(x1 - x0, y1 - y0), 1e-6)
+        def scaled(tvx, tvy):
+            n = max(np.hypot(tvx, tvy), 1e-6)
+            s = seg_len * 0.5  # scale factor controls elbow size
+            return (tvx / n * s, tvy / n * s)
+        T0 = scaled(t0x, t0y)
+        T1 = scaled(n_tx, n_ty)
+
+        # Heuristic: try flipping the vertical orientation of the next tangent
+        # and pick the blend with lower max curvature to avoid downward elbows.
+        bx1, by1 = hermite_blend((x0, y0), (x1, y1), T0, T1, steps=steps)
+        T1_flip = (T1[0], -T1[1])
+        bx2, by2 = hermite_blend((x0, y0), (x1, y1), T0, T1_flip, steps=steps)
+
+        def max_curv(xa, ya):
+            dx = np.gradient(xa)
+            dy = np.gradient(ya)
+            ddx = np.gradient(dx)
+            ddy = np.gradient(dy)
+            ds = np.sqrt(dx**2 + dy**2) + 1e-9
+            k = np.abs(ddx * dy - dx * ddy) / (ds**3)
+            return float(np.nanmax(k))
+
+        if max_curv(bx2, by2) < max_curv(bx1, by1):
+            return bx2, by2
+        return bx1, by1
 
     all_x = []
     all_y = []
@@ -632,15 +704,45 @@ def generate_track_from_blocks():
         x_rel, y_rel = block_info['block'].generate_profile(**block_info['params'])
 
         if idx == 0:
-            # First block: just place
-            all_x.extend(x_rel + current_x_offset)
-            all_y.extend(y_rel + current_y_offset)
+            # First block: add a short introductory blend from origin to avoid downward elbow
+            x0, y0 = 0.0, 0.0
+            x1, y1 = x_rel[0], y_rel[0]
+            # Tangent at start and a gentle initial horizontal tangent
+            n_tx, n_ty = endpoint_tangent(x_rel, y_rel, at_start=True)
+            seg_len = max(np.hypot(x1 - x0, y1 - y0), 1e-6)
+            init_scale = seg_len * 0.5
+            T0 = (init_scale, 0.0)
+            def scaled(vx, vy):
+                n = max(np.hypot(vx, vy), 1e-6)
+                return (vx / n * init_scale, vy / n * init_scale)
+            T1 = scaled(n_tx, n_ty)
+            bx1, by1 = hermite_blend((x0, y0), (x1, y1), T0, T1, steps=24)
+            T1_flip = (T1[0], -T1[1])
+            bx2, by2 = hermite_blend((x0, y0), (x1, y1), T0, T1_flip, steps=24)
+            def max_curv(xa, ya):
+                dx = np.gradient(xa)
+                dy = np.gradient(ya)
+                ddx = np.gradient(dx)
+                ddy = np.gradient(dy)
+                ds = np.sqrt(dx**2 + dy**2) + 1e-9
+                k = np.abs(ddx * dy - dx * ddy) / (ds**3)
+                return float(np.nanmax(k))
+            bx, by = (bx2, by2) if max_curv(bx2, by2) < max_curv(bx1, by1) else (bx1, by1)
+            # Append blend (skip origin to avoid duplicate)
+            all_x.extend(bx[1:].tolist())
+            all_y.extend(by[1:].tolist())
+            # Append rest of first block relative to last blend point
+            x_abs = x_rel + all_x[-1]
+            y_abs = y_rel + all_y[-1]
+            all_x.extend(x_abs.tolist())
+            all_y.extend(y_abs.tolist())
             current_x_offset = all_x[-1]
             current_y_offset = all_y[-1]
+            joints_count += 1
             continue
 
         # Before appending next block, insert a blend segment to match slopes
-        x_blend, y_blend = blend_joint(np.array(all_x), np.array(all_y), np.array(x_rel), np.array(y_rel))
+        x_blend, y_blend = blend_joint(np.array(all_x), np.array(all_y), np.array(x_rel), np.array(y_rel), steps=32)
 
         # Append blend (avoid duplicating endpoint)
         all_x.extend(x_blend[1:].tolist())
@@ -663,6 +765,27 @@ def generate_track_from_blocks():
     st.session_state.smoothness_warning = None
     _, final_curvature = detect_curvature_spikes(all_x, all_y)
     st.session_state.track_curvature = final_curvature
+    # If requested, enforce ending level equals starting level (y-coordinate)
+    if st.session_state.get('force_end_level'):
+        y_target = float(st.session_state.get('start_level', 0.0))
+        y_end = float(all_y[-1])
+        if abs(y_end - y_target) > 1e-3:
+            # Create a gentle leveling segment
+            x0, y0 = all_x[-1], all_y[-1]
+            x1 = x0 + 40.0
+            y1 = y_target
+            # Tangents: continue current direction, land horizontally
+            t0x, t0y = endpoint_tangent(all_x, all_y, at_start=False)
+            seg_len = max(np.hypot(x1 - x0, y1 - y0), 1e-6)
+            scale = seg_len * 0.5
+            def sc(vx, vy):
+                n = max(np.hypot(vx, vy), 1e-6)
+                return (vx / n * scale, vy / n * scale)
+            T0 = sc(t0x, t0y)
+            T1 = (scale, 0.0)
+            bx, by = hermite_blend((x0, y0), (x1, y1), T0, T1, steps=48)
+            all_x = np.concatenate([all_x, bx[1:]])
+            all_y = np.concatenate([all_y, by[1:]])
     return all_x, all_y
 
 def simple_gforce_analysis(x, y, initial_speed=15.0, dt=0.1):
@@ -784,6 +907,24 @@ def check_gforce_safety(accel_df):
 if len(st.session_state.track_sequence) > 0:
     st.session_state.track_x, st.session_state.track_y = generate_track_from_blocks()
     st.session_state.track_generated = True
+    # If random 3D is enabled, synthesize a gentle lateral profile (z) while keeping 2D plots unfolded
+    if st.session_state.get('random_3d'):
+        x = np.array(st.session_state.track_x)
+        n = len(x)
+        # Create low-amplitude lateral variations using a few harmonics
+        t = np.linspace(0, 1, n)
+        z = (
+            2.0 * np.sin(2*np.pi * (0.5*t)) +
+            1.2 * np.sin(2*np.pi * (1.0*t + 0.3)) +
+            0.8 * np.sin(2*np.pi * (1.8*t + 0.7))
+        )
+        # Smooth and scale to safe lateral displacement
+        # Smooth via moving average to avoid external dependencies
+        win = max(5, n // 100)
+        kernel = np.ones(win) / win
+        z = np.convolve(z, kernel, mode='same')
+        z *= 0.5  # meters
+        st.session_state.track_z = z.tolist()
     
     # Always get AI rating automatically
     st.session_state.get_ai_rating = True
@@ -793,11 +934,10 @@ if st.session_state.track_generated:
     # Create subplots layout
     st.subheader("🎢 Your Roller Coaster Design")
     
-    # Row 0: AI Rating Prediction (COMPACT)
+    # Row 0: AI Rating Prediction (COMPACT) + Library add button
     st.markdown("**🤖 AI Rating Prediction**")
     
-    # Optional manual rating trigger
-    rate_button = st.button("⭐ Rate this track (AI)", help="Run the BiGRU model on current accelerations")
+    # AI rating runs automatically (button removed)
 
     try:
         # Convert to 3D track format for the AI model
@@ -819,12 +959,12 @@ if st.session_state.track_generated:
             # Check safety FIRST before showing rating
             safety = check_gforce_safety(accel_df)
             
-            # Predict rating when requested, or if auto-rating flag is set
-            predicted_rating = st.session_state.get('predicted_rating')
-            if rate_button or st.session_state.get('get_ai_rating'):
-                predicted_rating = predict_score_bigru(accel_df)
-                st.session_state.predicted_rating = predicted_rating
+            # Predict rating automatically
+            predicted_rating = predict_score_bigru(accel_df)
+            st.session_state.predicted_rating = predicted_rating
             
+            # (Moved to sidebar)
+
             if safety['dangers']:
                 # DANGEROUS - Show warning AND rating side by side
                 col_danger, col_rate_danger = st.columns([1, 1])
@@ -885,6 +1025,37 @@ if st.session_state.track_generated:
                     else:
                         st.info("Click 'Rate this track' to compute AI score")
             
+            # On-demand 3D view (resource heavy)
+            st.divider()
+            st.markdown("**🧭 On-Demand 3D View**")
+            import plotly.graph_objects as go
+            downsample = st.slider("Preview resolution", 200, 2000, 1200, 100,
+                                    help="Fewer points = faster rendering")
+            if st.button("🎥 Generate 3D View", help="Render a 3D preview of the current track"):
+                x = np.array(st.session_state.track_x)
+                # Map vertical profile to Z axis for correct orientation
+                z = np.array(st.session_state.track_y)
+                # Lateral Y axis: use provided track_z if any, else zeros
+                y = np.array(st.session_state.get('track_z', np.zeros_like(x)))
+                n = len(x)
+                if n > downsample:
+                    idx = np.linspace(0, n-1, downsample).astype(int)
+                    x, y, z = x[idx], y[idx], z[idx]
+                fig3d = go.Figure(data=[
+                    go.Scatter3d(x=x, y=y, z=z,
+                                 mode='lines', line=dict(width=6, color='#1f77b4'),
+                                 name='Track')
+                ])
+                fig3d.update_layout(
+                    scene=dict(
+                        xaxis_title='X (m)', yaxis_title='Y (m)', zaxis_title='Z (m)',
+                        aspectmode='data',
+                        camera=dict(up=dict(x=0, y=0, z=1))
+                    ),
+                    height=600, margin=dict(l=0, r=0, t=30, b=0)
+                )
+                st.plotly_chart(fig3d, use_container_width=True)
+
         else:
             st.error("Track too short for AI analysis")
             # Fallback to simple g-force analysis
@@ -1161,6 +1332,96 @@ if st.session_state.track_generated:
         )
         
         st.plotly_chart(fig_g, use_container_width=True)
+
+    # Egg Plot Visualization (comfort envelopes)
+    if 'accel_df' in st.session_state:
+        accel_df = st.session_state.accel_df
+        st.divider()
+        st.markdown("**Egg Plots (Comfort Envelopes)**")
+
+        import plotly.graph_objects as go
+
+        # Helper to make an ellipse path
+        def ellipse_points(rx, ry, n=180):
+            t = np.linspace(0, 2*np.pi, n)
+            return rx*np.cos(t), ry*np.sin(t)
+
+        col_egg1, col_egg2, col_egg3 = st.columns(3)
+
+        # Lateral vs Vertical egg
+        with col_egg1:
+            fig_egg_lv = go.Figure()
+            fig_egg_lv.add_trace(go.Scatter(
+                x=accel_df['Lateral'], y=accel_df['Vertical'],
+                mode='markers', marker=dict(size=4, color=accel_df['Time'], colorscale='Viridis'),
+                name='Samples',
+                hovertemplate='Lat: %{x:.2f} g<br>Vert: %{y:.2f} g<extra></extra>'
+            ))
+            ex, ey = ellipse_points(2.0, 3.0)
+            fig_egg_lv.add_trace(go.Scatter(x=ex, y=ey, mode='lines', line=dict(color='green'), name='Comfort'))
+            ex2, ey2 = ellipse_points(3.5, 4.5)
+            fig_egg_lv.add_trace(go.Scatter(x=ex2, y=ey2, mode='lines', line=dict(color='orange', dash='dash'), name='Intense'))
+            ex3, ey3 = ellipse_points(5.0, 6.0)
+            fig_egg_lv.add_trace(go.Scatter(x=ex3, y=ey3, mode='lines', line=dict(color='red', dash='dot'), name='Danger'))
+            # Set equal aspect ratio and fixed symmetric ranges for circular look
+            fixed_r = 6.0
+            fig_egg_lv.update_layout(
+                title='Lat vs Vert (g)', xaxis_title='Lateral (g)', yaxis_title='Vertical (g)',
+                height=360, width=360, margin=dict(l=10, r=10, t=30, b=10),
+                xaxis=dict(range=[-fixed_r, fixed_r], scaleanchor='y', scaleratio=1),
+                yaxis=dict(range=[-fixed_r, fixed_r])
+            )
+            st.plotly_chart(fig_egg_lv, use_container_width=False)
+
+        # Longitudinal vs Vertical egg
+        with col_egg2:
+            fig_egg_lv2 = go.Figure()
+            fig_egg_lv2.add_trace(go.Scatter(
+                x=accel_df['Longitudinal'], y=accel_df['Vertical'],
+                mode='markers', marker=dict(size=4, color=accel_df['Time'], colorscale='Viridis'),
+                name='Samples',
+                hovertemplate='Long: %{x:.2f} g<br>Vert: %{y:.2f} g<extra></extra>'
+            ))
+            exa, eya = ellipse_points(3.0, 3.0)
+            fig_egg_lv2.add_trace(go.Scatter(x=exa, y=eya, mode='lines', line=dict(color='green'), name='Comfort'))
+            exa2, eya2 = ellipse_points(4.0, 4.5)
+            fig_egg_lv2.add_trace(go.Scatter(x=exa2, y=eya2, mode='lines', line=dict(color='orange', dash='dash'), name='Intense'))
+            exa3, eya3 = ellipse_points(6.0, 6.0)
+            fig_egg_lv2.add_trace(go.Scatter(x=exa3, y=eya3, mode='lines', line=dict(color='red', dash='dot'), name='Danger'))
+            # Equal aspect ratio and fixed symmetric ranges
+            fixed_r2 = 6.0
+            fig_egg_lv2.update_layout(
+                title='Long vs Vert (g)', xaxis_title='Longitudinal (g)', yaxis_title='Vertical (g)',
+                height=360, width=360, margin=dict(l=10, r=10, t=30, b=10),
+                xaxis=dict(range=[-fixed_r2, fixed_r2], scaleanchor='y', scaleratio=1),
+                yaxis=dict(range=[-fixed_r2, fixed_r2])
+            )
+            st.plotly_chart(fig_egg_lv2, use_container_width=False)
+
+        # Lateral vs Longitudinal egg
+        with col_egg3:
+            fig_egg_ll = go.Figure()
+            fig_egg_ll.add_trace(go.Scatter(
+                x=accel_df['Lateral'], y=accel_df['Longitudinal'],
+                mode='markers', marker=dict(size=4, color=accel_df['Time'], colorscale='Viridis'),
+                name='Samples',
+                hovertemplate='Lat: %{x:.2f} g<br>Long: %{y:.2f} g<extra></extra>'
+            ))
+            exb, eyb = ellipse_points(2.0, 3.0)
+            fig_egg_ll.add_trace(go.Scatter(x=exb, y=eyb, mode='lines', line=dict(color='green'), name='Comfort'))
+            exb2, eyb2 = ellipse_points(3.5, 4.0)
+            fig_egg_ll.add_trace(go.Scatter(x=exb2, y=eyb2, mode='lines', line=dict(color='orange', dash='dash'), name='Intense'))
+            exb3, eyb3 = ellipse_points(5.0, 6.0)
+            fig_egg_ll.add_trace(go.Scatter(x=exb3, y=eyb3, mode='lines', line=dict(color='red', dash='dot'), name='Danger'))
+            # Equal aspect ratio and fixed symmetric ranges
+            fixed_r3 = 6.0
+            fig_egg_ll.update_layout(
+                title='Lat vs Long (g)', xaxis_title='Lateral (g)', yaxis_title='Longitudinal (g)',
+                height=360, width=360, margin=dict(l=10, r=10, t=30, b=10),
+                xaxis=dict(range=[-fixed_r3, fixed_r3], scaleanchor='y', scaleratio=1),
+                yaxis=dict(range=[-fixed_r3, fixed_r3])
+            )
+            st.plotly_chart(fig_egg_ll, use_container_width=False)
     
     st.divider()
     
