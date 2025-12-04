@@ -3,27 +3,51 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 from utils.track import build_modular_track, compute_features_modular, compute_acceleration
+from utils.acceleration import compute_acc_profile
+from utils.track_library import ensure_library, pick_random_entry, load_entry
 from utils.visualize import plot_track
 from utils.model import predict_thrill
 from utils.bigru_predictor import predict_score_bigru
 import os
+import plotly.express as px
 
 
 st.set_page_config(page_title="AI Roller Coaster Designer", layout="wide")
 
 st.title("🎢 AI Roller Coaster Designer - Modular Track Builder")
 
-# Initialize session state for track elements
+# Initialize session state for track elements (simple coaster with one loop)
 if 'track_elements' not in st.session_state:
     st.session_state.track_elements = [
-        {'type': 'climb', 'params': {'length': 30, 'height': 50}},
-        {'type': 'drop', 'params': {'length': 60, 'angle': 70}},
-        {'type': 'loop', 'params': {'radius': 10}},
-        {'type': 'hills', 'params': {'num_hills': 3, 'amplitude': 8, 'wavelength': 30}},
+        {'type': 'climb', 'params': {'length': 40, 'height': 35}},
+        {'type': 'drop', 'params': {'length': 50, 'angle': 65}},
+        {'type': 'clothoid_loop', 'params': {'radius': 12, 'transition_length': 15}},
+        {'type': 'parabolic_curve', 'params': {'amplitude': 6, 'length': 40}},
     ]
 
 # Sidebar - Add/Remove Elements
 st.sidebar.header("🔧 Track Elements")
+st.sidebar.subheader("🎲 Library Random Start")
+use_library = st.sidebar.checkbox("Pick random from library", value=True)
+library_entries = ensure_library(dt=0.02)
+if use_library and library_entries:
+    if st.sidebar.button("🎲 Load random precomputed track"):
+        entry = pick_random_entry(library_entries)
+        geo, phys = load_entry(entry)
+        # build a DataFrame from points
+        pts = geo['points']
+        track_df = pd.DataFrame(pts, columns=['x','y','z'])
+        # attach physics
+        track_df['f_lat_g'] = phys['f_lat_g']
+        track_df['f_vert_g'] = phys['f_vert_g']
+        track_df['f_long_g'] = phys['f_long_g']
+        track_df['f_lat'] = phys['f_lat']
+        track_df['f_vert'] = phys['f_vert']
+        track_df['f_long'] = phys['f_long']
+        # stash for rendering (skip build path)
+        st.session_state._precomputed_track_df = track_df
+        st.session_state._precomputed_entry_name = entry['name']
+        st.experimental_rerun()
 
 # Add new element
 st.sidebar.subheader("Add Element")
@@ -52,6 +76,16 @@ if st.sidebar.button("➕ Add Element"):
     st.rerun()
 
 st.sidebar.markdown("---")
+
+# Performance / Preview Options
+st.sidebar.subheader("⚡ Performance")
+fast_preview = st.sidebar.checkbox("Fast preview (skip heavy compute)", value=True)
+plot_acc = st.sidebar.checkbox("Show acceleration chart", value=not fast_preview)
+compute_forces = st.sidebar.checkbox("Compute rider-frame forces", value=not fast_preview)
+preview_points = st.sidebar.slider("Preview resolution (points)", 100, 3000, 600, step=50)
+downsample_plot = st.sidebar.checkbox("Downsample plot for speed", value=True)
+enable_ai = st.sidebar.checkbox("Enable AI rating (on demand)", value=False)
+rate_now = st.sidebar.button("Rate this track")
 
 # Display and edit each element
 st.sidebar.subheader("Current Track Elements")
@@ -100,11 +134,42 @@ for idx, element in enumerate(st.session_state.track_elements):
             st.rerun()
 
 # --- Generate Track ---
-track_df = build_modular_track(st.session_state.track_elements)
+if '_precomputed_track_df' in st.session_state:
+    track_df = st.session_state._precomputed_track_df.copy()
+else:
+    track_df = build_modular_track(st.session_state.track_elements)
+if preview_points and len(track_df) > preview_points:
+    # uniform downsample for preview speed
+    idx = np.linspace(0, len(track_df)-1, preview_points).astype(int)
+    track_df = track_df.iloc[idx].reset_index(drop=True)
 
 # --- Compute Acceleration ---
-max_height = track_df['y'].max()
-track_df = compute_acceleration(track_df, max_height)
+if not fast_preview:
+    max_height = track_df['y'].max()
+    track_df = compute_acceleration(track_df, max_height)
+
+@st.cache_data
+def _cached_acc_profile(points_array, dt):
+    return compute_acc_profile(points_array, dt=dt)
+
+# --- Rider-Frame Accelerations (for AI) ---
+rider_acc_ok = False
+rider_acc_err = None
+if compute_forces:
+    try:
+        pts = track_df[['x','y','z']].to_numpy(dtype=float)
+        acc = _cached_acc_profile(pts.round(3), dt=0.02)
+        # attach normalized-by-g components expected by the AI later
+        track_df['f_lat_g'] = acc['f_lat_g']
+        track_df['f_vert_g'] = acc['f_vert_g']
+        track_df['f_long_g'] = acc['f_long_g']
+        # raw units too (optional)
+        track_df['f_lat'] = acc['f_lat']
+        track_df['f_vert'] = acc['f_vert']
+        track_df['f_long'] = acc['f_long']
+        rider_acc_ok = True
+    except Exception as _e:
+        rider_acc_err = str(_e)
 
 # --- Compute Features ---
 features = compute_features_modular(track_df, st.session_state.track_elements)
@@ -117,7 +182,7 @@ model_path = "models/bigru_score_model.pth"
 bigru_score = None
 bigru_error = None
 
-if os.path.exists(model_path):
+if enable_ai and rate_now and os.path.exists(model_path):
     try:
         bigru_score = predict_score_bigru(track_df, model_path)
     except Exception as e:
@@ -127,7 +192,24 @@ if os.path.exists(model_path):
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.plotly_chart(plot_track(track_df, color_by="acceleration"), width='stretch')
+    # Optionally downsample for plotting only
+    plot_df = track_df
+    if downsample_plot and len(plot_df) > 2000:
+        idxp = np.linspace(0, len(plot_df)-1, 2000).astype(int)
+        plot_df = plot_df.iloc[idxp].reset_index(drop=True)
+    st.plotly_chart(plot_track(plot_df, color_by="acceleration"), width='stretch')
+    # Optional: acceleration components over path index
+    if plot_acc and 'f_lat_g' in track_df and 'f_vert_g' in track_df and 'f_long_g' in track_df:
+        acc_plot_df = pd.DataFrame({
+            'index': np.arange(len(track_df)),
+            'Lateral (g)': track_df['f_lat_g'],
+            'Vertical (g)': track_df['f_vert_g'],
+            'Longitudinal (g)': track_df['f_long_g'],
+        })
+        acc_long = acc_plot_df.melt(id_vars=['index'], var_name='Component', value_name='g')
+        fig_acc = px.line(acc_long, x='index', y='g', color='Component', title='Rider-Frame Accelerations (g)')
+        fig_acc.update_layout(margin=dict(l=10,r=10,t=40,b=10))
+        st.plotly_chart(fig_acc, use_container_width=True)
 
 with col2:
     # Display predictions
@@ -144,7 +226,29 @@ with col2:
         elif bigru_error:
             st.error(f"BiGRU Error: {bigru_error}")
         else:
-            st.info("No BiGRU model found")
+            st.info("No BiGRU model found or not requested")
+
+    st.subheader("🎛️ Rider-Frame Accelerations")
+    if rider_acc_ok:
+        # show quick stats for validation
+        stats = {
+            'f_lat_g_max': float(np.max(np.abs(track_df['f_lat_g']))),
+            'f_vert_g_max': float(np.max(np.abs(track_df['f_vert_g']))),
+            'f_long_g_max': float(np.max(np.abs(track_df['f_long_g']))),
+        }
+        st.json(stats)
+        # Export for AI ingestion
+        export_cols = ['f_lat_g','f_vert_g','f_long_g']
+        export_df = track_df[export_cols].copy()
+        csv_bytes = export_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="⬇️ Download Accelerations (g) CSV",
+            data=csv_bytes,
+            file_name="rider_accelerations_g.csv",
+            mime="text/csv"
+        )
+    else:
+        st.error(f"Acceleration transform error: {rider_acc_err}")
     
     # Model info
     if bigru_score is not None:

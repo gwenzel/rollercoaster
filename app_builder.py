@@ -15,6 +15,7 @@ import os
 # Import utilities
 from utils.accelerometer_transform import track_to_accelerometer_data
 from utils.bigru_predictor import predict_score_bigru
+from utils.track_library import ensure_library, pick_random_entry, load_entry
 
 st.set_page_config(
     page_title="Roller Coaster Builder",
@@ -124,32 +125,22 @@ if 'initialized' not in st.session_state:
         {
             'type': 'lift_hill',
             'block': BLOCK_LIBRARY['lift_hill'],
-            'params': {'length': 60, 'height': 35}
+            'params': {'length': 40, 'height': 35}
         },
         {
-            'type': 'airtime_hill',
-            'block': BLOCK_LIBRARY['airtime_hill'],
-            'params': {'length': 45, 'height': 12}
+            'type': 'drop',
+            'block': BLOCK_LIBRARY['drop'],
+            'params': {'height': 30, 'steepness': 0.8}
         },
         {
-            'type': 'bunny_hop',
-            'block': BLOCK_LIBRARY['bunny_hop'],
-            'params': {'length': 25, 'height': 6}
-        },
-        {
-            'type': 'bunny_hop',
-            'block': BLOCK_LIBRARY['bunny_hop'],
-            'params': {'length': 20, 'height': 5}
-        },
-        {
-            'type': 'airtime_hill',
-            'block': BLOCK_LIBRARY['airtime_hill'],
-            'params': {'length': 40, 'height': 10}
+            'type': 'loop',
+            'block': BLOCK_LIBRARY['loop'],
+            'params': {'diameter': 24}
         },
         {
             'type': 'flat_section',
             'block': BLOCK_LIBRARY['flat_section'],
-            'params': {'length': 25}
+            'params': {'length': 30}
         }
     ]
     st.session_state.initialized = True
@@ -242,37 +233,72 @@ with st.sidebar:
                 {
                     'type': 'lift_hill',
                     'block': BLOCK_LIBRARY['lift_hill'],
-                    'params': {'length': 60, 'height': 35}
+                    'params': {'length': 40, 'height': 35}
                 },
                 {
-                    'type': 'airtime_hill',
-                    'block': BLOCK_LIBRARY['airtime_hill'],
-                    'params': {'length': 45, 'height': 12}
+                    'type': 'drop',
+                    'block': BLOCK_LIBRARY['drop'],
+                    'params': {'height': 30, 'steepness': 0.8}
                 },
                 {
-                    'type': 'bunny_hop',
-                    'block': BLOCK_LIBRARY['bunny_hop'],
-                    'params': {'length': 25, 'height': 6}
-                },
-                {
-                    'type': 'bunny_hop',
-                    'block': BLOCK_LIBRARY['bunny_hop'],
-                    'params': {'length': 20, 'height': 5}
-                },
-                {
-                    'type': 'airtime_hill',
-                    'block': BLOCK_LIBRARY['airtime_hill'],
-                    'params': {'length': 40, 'height': 10}
+                    'type': 'loop',
+                    'block': BLOCK_LIBRARY['loop'],
+                    'params': {'diameter': 24}
                 },
                 {
                     'type': 'flat_section',
                     'block': BLOCK_LIBRARY['flat_section'],
-                    'params': {'length': 25}
+                    'params': {'length': 30}
                 }
             ]
             st.session_state.track_generated = False
             st.success("🔄 Reset to default template!")
             st.rerun()
+
+    # Precomputed safe library
+    st.subheader("📚 Precomputed Safe Library")
+    try:
+        library_entries = ensure_library(dt=0.02)
+        col_lib1, col_lib2 = st.columns(2)
+        with col_lib1:
+            if st.button("🎲 Load Random Precomputed", use_container_width=True):
+                entry = pick_random_entry(library_entries)
+                geo, phys = load_entry(entry)
+                pts = geo['points']
+                # Set current track geometry
+                st.session_state.track_x = pts[:,0]
+                st.session_state.track_y = pts[:,1]
+                st.session_state.track_generated = True
+                # Build accelerometer dataframe expected by the UI
+                n = pts.shape[0]
+                dt = 0.02
+                time = np.arange(n) * dt
+                accel_df = pd.DataFrame({
+                    'Time': time,
+                    'Vertical': phys['f_vert_g'],
+                    'Lateral': phys['f_lat_g'],
+                    'Longitudinal': phys['f_long_g'],
+                })
+                st.session_state.accel_df = accel_df
+                st.success(f"Loaded precomputed track: {entry['name']}")
+                st.rerun()
+        with col_lib2:
+            if st.button("🗂️ Use Library Default", use_container_width=True):
+                # Set default to the first library entry's elements
+                if library_entries:
+                    st.session_state.track_sequence = [
+                        {
+                            'type': e['type'],
+                            'block': BLOCK_LIBRARY[e['type'] if e['type'] in BLOCK_LIBRARY else 'flat_section'],
+                            'params': e['params']
+                        }
+                        for e in library_entries[0]['elements']
+                    ]
+                    st.session_state.track_generated = False
+                    st.success("Applied library default template")
+                    st.rerun()
+    except Exception as _lib_e:
+        st.caption("Library unavailable; continuing without precomputed tracks.")
     
     st.divider()
     
@@ -770,6 +796,9 @@ if st.session_state.track_generated:
     # Row 0: AI Rating Prediction (COMPACT)
     st.markdown("**🤖 AI Rating Prediction**")
     
+    # Optional manual rating trigger
+    rate_button = st.button("⭐ Rate this track (AI)", help="Run the BiGRU model on current accelerations")
+
     try:
         # Convert to 3D track format for the AI model
         track_df = pd.DataFrame({
@@ -778,8 +807,10 @@ if st.session_state.track_generated:
             'z': np.zeros_like(st.session_state.track_x)  # No lateral banking yet
         })
         
-        # Get accelerometer data using the existing function
-        accel_df = track_to_accelerometer_data(track_df)
+        # Get accelerometer data using the existing function, unless precomputed is already present
+        accel_df = st.session_state.get('accel_df')
+        if accel_df is None or len(accel_df) < 10:
+            accel_df = track_to_accelerometer_data(track_df)
         
         if accel_df is not None and len(accel_df) > 10:
             # Store for g-force plot
@@ -788,9 +819,11 @@ if st.session_state.track_generated:
             # Check safety FIRST before showing rating
             safety = check_gforce_safety(accel_df)
             
-            # Always predict rating first
-            predicted_rating = predict_score_bigru(accel_df)
-            st.session_state.predicted_rating = predicted_rating
+            # Predict rating when requested, or if auto-rating flag is set
+            predicted_rating = st.session_state.get('predicted_rating')
+            if rate_button or st.session_state.get('get_ai_rating'):
+                predicted_rating = predict_score_bigru(accel_df)
+                st.session_state.predicted_rating = predicted_rating
             
             if safety['dangers']:
                 # DANGEROUS - Show warning AND rating side by side
@@ -802,9 +835,12 @@ if st.session_state.track_generated:
                     st.caption("⚠️ Fix safety issues")
                 
                 with col_rate_danger:
-                    st.markdown(f'<div style="font-size: 2rem; font-weight: bold; text-align: center; color: #FFD700;">⭐ {predicted_rating:.2f}</div>', 
-                               unsafe_allow_html=True)
-                    st.caption("Rating (if rideable)")
+                    if predicted_rating is not None:
+                        st.markdown(f'<div style="font-size: 2rem; font-weight: bold; text-align: center; color: #FFD700;">⭐ {predicted_rating:.2f}</div>', 
+                                   unsafe_allow_html=True)
+                        st.caption("Rating (if rideable)")
+                    else:
+                        st.info("Click 'Rate this track' to compute AI score")
                 
             elif safety['warnings']:
                 # Has warnings - compact format with rating
@@ -815,9 +851,12 @@ if st.session_state.track_generated:
                         st.caption(warning)
                 
                 with col_rate:
-                    st.markdown(f'<div style="font-size: 2rem; font-weight: bold; text-align: center; color: #FFD700;">⭐ {predicted_rating:.2f}</div>', 
-                               unsafe_allow_html=True)
-                    st.caption("⚠️ Has comfort issues")
+                    if predicted_rating is not None:
+                        st.markdown(f'<div style="font-size: 2rem; font-weight: bold; text-align: center; color: #FFD700;">⭐ {predicted_rating:.2f}</div>', 
+                                   unsafe_allow_html=True)
+                        st.caption("⚠️ Has comfort issues")
+                    else:
+                        st.info("Click 'Rate this track' to compute AI score")
                 
             else:
                 # SAFE - Compact two-column layout
@@ -839,9 +878,12 @@ if st.session_state.track_generated:
                 
                 with col_rating:
                     # Numerical rating with smaller display
-                    st.markdown(f'<div style="font-size: 2.5rem; font-weight: bold; text-align: center; color: #FFD700; margin-top: 0;">⭐ {predicted_rating:.2f}</div>', 
-                               unsafe_allow_html=True)
-                    st.progress(predicted_rating / 5.0)
+                    if predicted_rating is not None:
+                        st.markdown(f'<div style="font-size: 2.5rem; font-weight: bold; text-align: center; color: #FFD700; margin-top: 0;">⭐ {predicted_rating:.2f}</div>', 
+                                   unsafe_allow_html=True)
+                        st.progress(predicted_rating / 5.0)
+                    else:
+                        st.info("Click 'Rate this track' to compute AI score")
             
         else:
             st.error("Track too short for AI analysis")
