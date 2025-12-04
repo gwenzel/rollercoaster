@@ -147,11 +147,11 @@ with st.sidebar:
     col_rand1_top, col_rand2_top = st.columns(2)
     
     with col_rand1_top:
-        if st.button("🎲 Random Template", key="random_top", use_container_width=True, help="Generate a random coaster with 4-8 blocks"):
+        if st.button("🎲 Random Template", key="random_top", use_container_width=True, help="Generate a random coaster with 5-10 blocks"):
             import random
             
             # Random number of blocks (4-8)
-            num_blocks = random.randint(4, 8)
+            num_blocks = random.randint(5, 10)
             
             # Always start with a lift hill followed by a vertical drop and a flat section
             new_sequence = [
@@ -180,15 +180,32 @@ with st.sidebar:
             
             # Available blocks (after initial drop + flat)
             available_blocks = ['drop', 'loop', 'airtime_hill', 'spiral', 'bunny_hop', 'banked_turn']
+
+            # Record the initial drop height to cap later drops to <= 1/3
+            first_drop_height = next((b['params']['height'] for b in new_sequence if b['type'] == 'drop'), None)
             
             for i in range(num_blocks - 3):  # -3 because we added lift + drop + flat
                 block_type = random.choice(available_blocks)
+                # Enforce: at least one flat section in every 3 blocks
+                # Check last two blocks (after the initial lift+drop+flat)
+                recent_types = [b['type'] for b in new_sequence[-2:]] if len(new_sequence) >= 2 else []
+                # If this would make three consecutive without a flat, force a flat_section
+                if (i % 3 == 2) and ('flat_section' not in recent_types):
+                    block_type = 'flat_section'
                 
                 if block_type == 'drop':
-                    params = {
-                        'height': random.randint(20, 50),
-                        'steepness': random.uniform(0.6, 0.85)  # Max 30° angle
-                    }
+                    # Cap height to at most 1/3 of the original first drop
+                    if first_drop_height is not None:
+                        max_drop = max(5, int(first_drop_height / 3))
+                        params = {
+                            'height': random.randint(5, max_drop),
+                            'steepness': random.uniform(0.6, 0.85)
+                        }
+                    else:
+                        params = {
+                            'height': random.randint(20, 50),
+                            'steepness': random.uniform(0.6, 0.85)
+                        }
                 elif block_type == 'loop':
                     params = {'diameter': random.randint(20, 40)}
                 elif block_type == 'airtime_hill':
@@ -210,6 +227,10 @@ with st.sidebar:
                     params = {
                         'radius': random.randint(20, 40),
                         'angle': random.randint(60, 120)
+                    }
+                elif block_type == 'flat_section':
+                    params = {
+                        'length': random.randint(20, 40)
                     }
                 
                 new_sequence.append({
@@ -903,6 +924,42 @@ def check_gforce_safety(accel_df):
         'max_longitudinal': max_longitudinal
     }
 
+def compute_airtime_metrics(accel_df, floater_threshold=-0.2, flojector_threshold=-0.5):
+    """Compute airtime metrics from vertical g data.
+    Categories (by vertical g in g-units):
+    - Floater: -0.2 <= g < 0.0 (light weightlessness)
+    - Flojector: -0.5 <= g < -0.2 (moderate negative g)
+    - Ejector: g < -0.5 (strong negative g)
+
+    Returns seconds for each category and total airtime.
+    Thresholds can be tuned; uses time spacing from 'Time' column.
+    """
+    if accel_df is None or 'Vertical' not in accel_df or 'Time' not in accel_df:
+        return {'floater': 0.0, 'flojector': 0.0, 'ejector': 0.0, 'total_airtime': 0.0}
+
+    t = accel_df['Time'].to_numpy()
+    g = accel_df['Vertical'].to_numpy()
+    if len(t) < 2:
+        dt = 0.1
+    else:
+        dt = float(np.median(np.diff(t)))
+
+    floater_mask = (g >= floater_threshold) & (g < 0.0)
+    flojector_mask = (g >= flojector_threshold) & (g < floater_threshold)
+    ejector_mask = (g < flojector_threshold)
+
+    floater_time = float(floater_mask.sum() * dt)
+    flojector_time = float(flojector_mask.sum() * dt)
+    ejector_time = float(ejector_mask.sum() * dt)
+    total_airtime = floater_time + flojector_time + ejector_time
+
+    return {
+        'floater': floater_time,
+        'flojector': flojector_time,
+        'ejector': ejector_time,
+        'total_airtime': total_airtime,
+    }
+
 # Auto-generate preview when blocks are added
 if len(st.session_state.track_sequence) > 0:
     st.session_state.track_x, st.session_state.track_y = generate_track_from_blocks()
@@ -958,6 +1015,9 @@ if st.session_state.track_generated:
             
             # Check safety FIRST before showing rating
             safety = check_gforce_safety(accel_df)
+            # Compute airtime metrics and store
+            airtime = compute_airtime_metrics(accel_df)
+            st.session_state.airtime_metrics = airtime
             
             # Predict rating automatically
             predicted_rating = predict_score_bigru(accel_df)
@@ -997,7 +1057,6 @@ if st.session_state.track_generated:
                         st.caption("⚠️ Has comfort issues")
                     else:
                         st.info("Click 'Rate this track' to compute AI score")
-                
             else:
                 # SAFE - Compact two-column layout
                 col_bucket, col_rating = st.columns([1, 1])
@@ -1015,6 +1074,10 @@ if st.session_state.track_generated:
                         st.info("😊 **Solid Design**")
                     else:
                         st.warning("💡 **Needs More Excitement**")
+                    # Airtime summary
+                    st.markdown("**🎈 Airtime**")
+                    st.text(f"Floater: {airtime['floater']:.2f}s; Flojector: {airtime['flojector']:.2f}s; Ejector: {airtime['ejector']:.2f}s")
+                    st.caption(f"Total airtime: {airtime['total_airtime']:.2f}s")
                 
                 with col_rating:
                     # Numerical rating with smaller display
@@ -1025,36 +1088,7 @@ if st.session_state.track_generated:
                     else:
                         st.info("Click 'Rate this track' to compute AI score")
             
-            # On-demand 3D view (resource heavy)
-            st.divider()
-            st.markdown("**🧭 On-Demand 3D View**")
-            import plotly.graph_objects as go
-            downsample = st.slider("Preview resolution", 200, 2000, 1200, 100,
-                                    help="Fewer points = faster rendering")
-            if st.button("🎥 Generate 3D View", help="Render a 3D preview of the current track"):
-                x = np.array(st.session_state.track_x)
-                # Map vertical profile to Z axis for correct orientation
-                z = np.array(st.session_state.track_y)
-                # Lateral Y axis: use provided track_z if any, else zeros
-                y = np.array(st.session_state.get('track_z', np.zeros_like(x)))
-                n = len(x)
-                if n > downsample:
-                    idx = np.linspace(0, n-1, downsample).astype(int)
-                    x, y, z = x[idx], y[idx], z[idx]
-                fig3d = go.Figure(data=[
-                    go.Scatter3d(x=x, y=y, z=z,
-                                 mode='lines', line=dict(width=6, color='#1f77b4'),
-                                 name='Track')
-                ])
-                fig3d.update_layout(
-                    scene=dict(
-                        xaxis_title='X (m)', yaxis_title='Y (m)', zaxis_title='Z (m)',
-                        aspectmode='data',
-                        camera=dict(up=dict(x=0, y=0, z=1))
-                    ),
-                    height=600, margin=dict(l=0, r=0, t=30, b=0)
-                )
-                st.plotly_chart(fig3d, use_container_width=True)
+            # 3D view moved to bottom section
 
         else:
             st.error("Track too short for AI analysis")
@@ -1152,6 +1186,36 @@ if st.session_state.track_generated:
         col_a.metric("Max Height", f"{max_height:.1f} m")
         col_b.metric("Total Drop", f"{max_drop:.1f} m")
         col_b.metric("Max Angle (excl. lift)", f"{max_angle_after_lift:.1f}° {smoothness_emoji}")
+
+        # Airtime metrics if available (large-number display)
+        airtime = st.session_state.get('airtime_metrics')
+        if airtime:
+            st.markdown("**🎈 Airtime**")
+            col_floater, col_flojector, col_ejector, col_total = st.columns([1, 1, 1, 1])
+            with col_floater:
+                st.markdown(
+                    f"<div style='font-size: 1.8rem; font-weight: bold; text-align: center;'>⛅ {airtime['floater']:.2f}s</div>",
+                    unsafe_allow_html=True
+                )
+                st.caption("Floater")
+            with col_flojector:
+                st.markdown(
+                    f"<div style='font-size: 1.8rem; font-weight: bold; text-align: center;'>💨 {airtime['flojector']:.2f}s</div>",
+                    unsafe_allow_html=True
+                )
+                st.caption("Flojector")
+            with col_ejector:
+                st.markdown(
+                    f"<div style='font-size: 1.8rem; font-weight: bold; text-align: center;'>🚀 {airtime['ejector']:.2f}s</div>",
+                    unsafe_allow_html=True
+                )
+                st.caption("Ejector")
+            with col_total:
+                st.markdown(
+                    f"<div style='font-size: 1.8rem; font-weight: bold; text-align: center; color: #FFD700;'>Σ {airtime['total_airtime']:.2f}s</div>",
+                    unsafe_allow_html=True
+                )
+                st.caption("Total")
         
         if max_angle_after_lift > 30:
             st.caption("⚠️ Track has steep sections (>30°) - smoothing applied")
@@ -1490,6 +1554,37 @@ if st.session_state.track_generated:
         
         if airtime_seconds > 0:
             st.success(f"🎈 **Airtime Detected:** {airtime_seconds:.1f} seconds of negative G-forces!")
+
+    # Bottom: On-demand 3D view (resource heavy)
+    st.divider()
+    st.subheader("🧭 On-Demand 3D View")
+    import plotly.graph_objects as go
+    downsample = st.slider("Preview resolution", 200, 2000, 1200, 100,
+                            help="Fewer points = faster rendering")
+    if st.button("🎥 Generate 3D View", help="Render a 3D preview of the current track") and 'track_x' in st.session_state:
+        x = np.array(st.session_state.track_x)
+        # Map vertical profile to Z axis for correct orientation
+        z = np.array(st.session_state.track_y)
+        # Lateral Y axis: use provided track_z if any, else zeros
+        y = np.array(st.session_state.get('track_z', np.zeros_like(x)))
+        n = len(x)
+        if n > downsample:
+            idx = np.linspace(0, n-1, downsample).astype(int)
+            x, y, z = x[idx], y[idx], z[idx]
+        fig3d = go.Figure(data=[
+            go.Scatter3d(x=x, y=y, z=z,
+                         mode='lines', line=dict(width=6, color='#1f77b4'),
+                         name='Track')
+        ])
+        fig3d.update_layout(
+            scene=dict(
+                xaxis_title='X (m)', yaxis_title='Y (m)', zaxis_title='Z (m)',
+                aspectmode='data',
+                camera=dict(up=dict(x=0, y=0, z=1))
+            ),
+            height=600, margin=dict(l=0, r=0, t=30, b=0)
+        )
+        st.plotly_chart(fig3d, use_container_width=True)
 
 else:
     # Welcome screen
