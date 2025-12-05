@@ -152,6 +152,15 @@ class RatingDistributionCrawler:
             
             # Add scrape timestamp
             data['scraped_at'] = datetime.now().isoformat()
+
+            # Parse physical specs (height, speed, length) from page text
+            try:
+                specs = self._extract_specs(soup)
+                if specs:
+                    data.update(specs)
+            except Exception as _spec_e:
+                # Keep going even if spec parsing fails
+                pass
             
             return data
             
@@ -281,6 +290,48 @@ class RatingDistributionCrawler:
         
         df.to_csv(checkpoint_file, index=False, encoding='utf-8')
         print(f"  💾 Progress saved to {checkpoint_file}")
+
+    def _extract_specs(self, soup: BeautifulSoup) -> Dict[str, float]:
+        """Extract physical specifications from the coaster page.
+        Returns a dict with keys: height_m, speed_kmh, track_length_m (floats when available).
+        """
+        text = soup.get_text(separator='\n')
+        # Normalize text (replace commas in numbers, unify units)
+        def _to_float(num_str: str) -> Optional[float]:
+            try:
+                return float(num_str.replace(',', '.'))
+            except Exception:
+                return None
+
+        specs: Dict[str, float] = {}
+
+        # Height in meters
+        m = re.search(r'(?:Height|Total\s*height|Max\s*height)[^\d]*(\d+(?:[\.,]\d+)?)\s*m', text, flags=re.IGNORECASE)
+        if m:
+            val = _to_float(m.group(1))
+            if val is not None:
+                specs['height_m'] = val
+
+        # Speed with unit conversion support
+        m_kmh = re.search(r'(?:Speed|Top\s*speed)[^\d]*(\d+(?:[\.,]\d+)?)\s*(?:km/?h|kmh|kph)', text, flags=re.IGNORECASE)
+        m_mph = re.search(r'(?:Speed|Top\s*speed)[^\d]*(\d+(?:[\.,]\d+)?)\s*mph', text, flags=re.IGNORECASE)
+        if m_kmh:
+            val = _to_float(m_kmh.group(1))
+            if val is not None:
+                specs['speed_kmh'] = val
+        elif m_mph:
+            val = _to_float(m_mph.group(1))
+            if val is not None:
+                specs['speed_kmh'] = round(val * 1.60934, 2)
+
+        # Track length in meters
+        m_len = re.search(r'(?:Length|Track\s*length|Total\s*length)[^\d]*(\d+(?:[\.,]\d+)?)\s*m', text, flags=re.IGNORECASE)
+        if m_len:
+            val = _to_float(m_len.group(1))
+            if val is not None:
+                specs['track_length_m'] = val
+
+        return specs
     
     def scrape_single_coaster(self, coaster_id: int) -> Optional[Dict]:
         """
