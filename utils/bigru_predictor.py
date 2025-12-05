@@ -25,6 +25,7 @@ class StreamlitBiGRUPredictor:
         Args:
             model_path: Path to saved model checkpoint
         """
+        # Always use the provided model path (models folder)
         self.model_path = model_path
         self.predictor = None
         self._load_model()
@@ -46,32 +47,32 @@ class StreamlitBiGRUPredictor:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         checkpoint = torch.load(self.model_path, map_location=device, weights_only=False)
         
-        # Define the notebook's BiGRU model architecture
+        # Define the notebook's BiGRU model architecture (matched to checkpoint)
         class BiGRURegressor(nn.Module):
-            def __init__(self, input_size_accel=3, input_size_airtime=4, hidden_size=256, num_layers=2, dropout=0.3):
+            def __init__(self, input_size_accel=3, input_size_airtime=4, hidden_size=128, num_layers=1, dropout=0.3):
                 super(BiGRURegressor, self).__init__()
                 self.gru = nn.GRU(
                     input_size=input_size_accel,
                     hidden_size=hidden_size,
                     num_layers=num_layers,
                     batch_first=True,
-                    dropout=dropout if num_layers > 1 else 0,
+                    dropout=0,
                     bidirectional=True
                 )
                 self.airtime_head = nn.Sequential(
-                    nn.Linear(input_size_airtime, 256),
+                    nn.Linear(input_size_airtime, 128),
                     nn.ReLU(),
                     nn.Dropout(dropout)
                 )
-                combined_size = hidden_size * 2 + 256
+                combined_size = hidden_size * 2 + 128  # 256 + 128 = 384
                 self.head = nn.Sequential(
-                    nn.Linear(combined_size, 512),
+                    nn.Linear(combined_size, 256),
                     nn.ReLU(),
                     nn.Dropout(dropout),
-                    nn.Linear(512, 256),
+                    nn.Linear(256, 128),
                     nn.ReLU(),
                     nn.Dropout(dropout),
-                    nn.Linear(256, 1)
+                    nn.Linear(128, 1)
                 )
             
             def forward(self, x_accel, x_airtime):
@@ -89,8 +90,8 @@ class StreamlitBiGRUPredictor:
             def __init__(self):
                 self.device = device
                 self.model = None
-                self.scaler_accel = None
-                self.scaler_score = None
+                self.scaler_airtime = None
+                self.scaler_rating = None
                 self.input_size = 3
                 self.seq_length = 100
         
@@ -98,32 +99,29 @@ class StreamlitBiGRUPredictor:
         
         # Try to load scalers from pickle files (notebook format)
         try:
-            with open('scaler_airtime.pkl', 'rb') as f:
-                self.predictor.scaler_accel = pickle.load(f)
-            with open('scaler_ratings.pkl', 'rb') as f:
-                self.predictor.scaler_score = pickle.load(f)
-            print("✓ Loaded scalers from pickle files")
+            with open('models/scaler_airtime.pkl', 'rb') as f:
+                self.predictor.scaler_airtime = pickle.load(f)
+            with open('models/scaler_ratings.pkl', 'rb') as f:
+                self.predictor.scaler_rating = pickle.load(f)
+            print("✓ Loaded scalers from models folder (airtime & ratings)")
         except FileNotFoundError:
             # Fallback: try to get scalers from checkpoint
-            self.predictor.scaler_accel = checkpoint.get('scaler_accel', None)
-            self.predictor.scaler_score = checkpoint.get('scaler_score', None)
+            self.predictor.scaler_airtime = checkpoint.get('scaler_airtime', None)
+            self.predictor.scaler_rating = checkpoint.get('scaler_rating', None)
             
             # If still None, create dummy fitted scalers
-            if self.predictor.scaler_accel is None:
-                self.predictor.scaler_accel = StandardScaler()
-                # Fit with dummy data similar to typical acceleration data
-                dummy_accel = np.random.randn(1000, 3)
-                dummy_accel[:, 0] *= 0.5  # Lateral
-                dummy_accel[:, 1] = dummy_accel[:, 1] * 0.5 + 1.0  # Vertical (centered at 1g)
-                dummy_accel[:, 2] *= 0.3  # Longitudinal
-                self.predictor.scaler_accel.fit(dummy_accel)
-                print("⚠ Created fitted scaler for acceleration (using dummy data)")
+            if self.predictor.scaler_airtime is None:
+                self.predictor.scaler_airtime = StandardScaler()
+                # Fit with dummy airtime feature ranges
+                dummy_airtime = np.random.randn(1000, 4)
+                self.predictor.scaler_airtime.fit(dummy_airtime)
+                print("⚠ Created fitted scaler for airtime features (using dummy data)")
             
-            if self.predictor.scaler_score is None:
-                self.predictor.scaler_score = StandardScaler()
+            if self.predictor.scaler_rating is None:
+                self.predictor.scaler_rating = StandardScaler()
                 # Fit with typical coaster rating range (3.0-5.0)
                 dummy_scores = np.random.uniform(3.0, 5.0, size=(100, 1))
-                self.predictor.scaler_score.fit(dummy_scores)
+                self.predictor.scaler_rating.fit(dummy_scores)
                 print("⚠ Created fitted scaler for ratings (using dummy data)")
         
         # Get model parameters
@@ -132,7 +130,18 @@ class StreamlitBiGRUPredictor:
         
         # Create and load model with notebook architecture
         self.predictor.model = BiGRURegressor().to(device)
-        self.predictor.model.load_state_dict(checkpoint['model_state_dict'])
+        # Accept either keyed or raw state_dict formats
+        state_dict = checkpoint.get('model_state_dict', None)
+        if state_dict is None:
+            # If file is a raw state_dict, use it directly
+            if all(isinstance(k, str) for k in checkpoint.keys()):
+                state_dict = checkpoint
+            else:
+                raise KeyError(
+                    "Checkpoint missing 'model_state_dict' and not a raw state_dict. "
+                    "Please save with model_state_dict or provide a compatible file."
+                )
+        self.predictor.model.load_state_dict(state_dict)
         self.predictor.model.eval()
         
         print(f"✓ Model loaded from {self.model_path}")
@@ -177,28 +186,37 @@ class StreamlitBiGRUPredictor:
         try:
             import torch
             
-            # Normalize acceleration data
-            accel_normalized = self.predictor.scaler_accel.transform(acceleration_data)
+            # Acceleration passes through (no accel scaler needed)
+            accel_tensor = torch.FloatTensor(acceleration_data).unsqueeze(0).to(self.predictor.device)
             
-            # Convert to tensor and add batch dimension
-            accel_tensor = torch.FloatTensor(accel_normalized).unsqueeze(0).to(self.predictor.device)
-            
-            # Create dummy airtime features (4 features as per model architecture)
-            # In a full implementation, these would be calculated from the track
-            airtime_features = np.zeros((1, 4))
+            # Compute airtime features from Vertical g channel
+            v = acceleration_data[:, 1].astype(float)
+            airtime_mask = v < 0.2
+            airtime_count = int(np.sum(airtime_mask))
+            airtime_ratio = float(np.mean(airtime_mask)) if len(v) > 0 else 0.0
+            min_vertical_g = float(np.min(v)) if len(v) > 0 else 1.0
+            transitions = np.diff(airtime_mask.astype(int)) if len(v) > 1 else np.array([])
+            segments = int(np.sum(transitions == 1)) if transitions.size > 0 else 0
+            airtime_features = np.array([[airtime_count, airtime_ratio, min_vertical_g, segments]], dtype=float)
+            # Normalize airtime features if scaler available
+            if self.predictor.scaler_airtime is not None:
+                airtime_features = self.predictor.scaler_airtime.transform(airtime_features)
             airtime_tensor = torch.FloatTensor(airtime_features).to(self.predictor.device)
             
             # Run prediction
             with torch.no_grad():
                 prediction_normalized = self.predictor.model(accel_tensor, airtime_tensor)
             
-            # Denormalize prediction
-            prediction = self.predictor.scaler_score.inverse_transform(
-                prediction_normalized.cpu().numpy().reshape(-1, 1)
-            )[0, 0]
+            # Denormalize prediction if rating scaler available; else use raw
+            pred_np = prediction_normalized.cpu().numpy().reshape(-1, 1)
+            if self.predictor.scaler_score is not None:
+                prediction = self.predictor.scaler_score.inverse_transform(pred_np)[0, 0]
+            else:
+                prediction = float(pred_np[0, 0])
             
             # Clip to reasonable range (models can sometimes predict outside training range)
             predicted_score = np.clip(prediction, 1.0, 5.0)
+            print(f"Predicted (denorm, clipped): {predicted_score:.3f}")
             
             return float(predicted_score)
         except Exception as e:

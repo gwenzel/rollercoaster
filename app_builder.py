@@ -247,6 +247,10 @@ with st.sidebar:
             })
             
             st.session_state.track_sequence = new_sequence
+            # Clear cached metrics to force recomputation on rerun
+            st.session_state.predicted_rating = None
+            st.session_state.accel_df = None
+            st.session_state.airtime_metrics = None
             st.session_state.track_generated = False
             # Enforce end level equals start for random generation
             st.session_state.force_end_level = True
@@ -464,10 +468,47 @@ with st.sidebar:
         for idx, block_info in enumerate(st.session_state.track_sequence):
             with st.expander(f"{idx+1}. {block_info['block'].icon} {block_info['block'].name}", expanded=False):
                 # Show parameters
-                st.caption("**Current Parameters:**")
-                for param_name, param_value in block_info['params'].items():
-                    if param_name != 'current_height':  # Don't show internal params
-                        st.text(f"• {param_name}: {param_value:.1f}" if isinstance(param_value, float) else f"• {param_name}: {param_value}")
+                st.caption("**Edit Parameters:**")
+                edited_params = block_info['params'].copy()
+                btype = block_info.get('type')
+                # Render appropriate controls per block type
+                if btype == 'lift_hill':
+                    edited_params['length'] = st.slider("Length (m)", 20, 100, int(edited_params.get('length', 50)), 5, key=f"edit_len_{idx}")
+                    edited_params['height'] = st.slider("Height (m)", 20, 80, int(edited_params.get('height', 40)), 5, key=f"edit_h_{idx}")
+                elif btype == 'drop':
+                    edited_params['height'] = st.slider("Drop Height (m)", 20, 90, int(edited_params.get('height', 40)), 5, key=f"edit_dh_{idx}")
+                    edited_params['steepness'] = st.slider("Steepness (max 30°)", 0.5, 1.0, float(edited_params.get('steepness', 0.8)), 0.05, key=f"edit_ds_{idx}")
+                elif btype == 'loop':
+                    edited_params['diameter'] = st.slider("Loop Diameter (m)", 15, 45, int(edited_params.get('diameter', 30)), 5, key=f"edit_ld_{idx}")
+                elif btype == 'airtime_hill':
+                    edited_params['length'] = st.slider("Hill Length (m)", 20, 60, int(edited_params.get('length', 40)), 5, key=f"edit_ahl_{idx}")
+                    edited_params['height'] = st.slider("Hill Height (m)", 5, 25, int(edited_params.get('height', 15)), 1, key=f"edit_ahh_{idx}")
+                elif btype == 'spiral':
+                    edited_params['diameter'] = st.slider("Spiral Diameter (m)", 15, 40, int(edited_params.get('diameter', 25)), 5, key=f"edit_spd_{idx}")
+                    edited_params['turns'] = st.slider("Number of Turns", 0.5, 3.0, float(edited_params.get('turns', 1.5)), 0.5, key=f"edit_spt_{idx}")
+                elif btype == 'bunny_hop':
+                    edited_params['length'] = st.slider("Hop Length (m)", 10, 30, int(edited_params.get('length', 20)), 5, key=f"edit_bhl_{idx}")
+                    edited_params['height'] = st.slider("Hop Height (m)", 3, 15, int(edited_params.get('height', 8)), 1, key=f"edit_bhh_{idx}")
+                elif btype == 'banked_turn':
+                    edited_params['radius'] = st.slider("Turn Radius (m)", 15, 50, int(edited_params.get('radius', 30)), 5, key=f"edit_btr_{idx}")
+                    edited_params['angle'] = st.slider("Turn Angle (°)", 30, 180, int(edited_params.get('angle', 90)), 15, key=f"edit_bta_{idx}")
+                elif btype == 'flat_section':
+                    edited_params['length'] = st.slider("Section Length (m)", 10, 50, int(edited_params.get('length', 30)), 5, key=f"edit_fsl_{idx}")
+                else:
+                    # Fallback generic editors
+                    for param_name, param_value in edited_params.items():
+                        if param_name == 'current_height':
+                            continue
+                        if isinstance(param_value, (int, float)):
+                            edited_params[param_name] = st.number_input(param_name, value=float(param_value), key=f"edit_gen_{param_name}_{idx}")
+                        else:
+                            edited_params[param_name] = st.text_input(param_name, value=str(param_value), key=f"edit_gen_txt_{param_name}_{idx}")
+
+                if st.button("💾 Save Changes", key=f"save_{idx}", use_container_width=True):
+                    st.session_state.track_sequence[idx]['params'] = edited_params
+                    st.session_state.track_generated = False
+                    st.success("Saved block changes")
+                    st.rerun()
                 
                 col_del, col_up, col_down = st.columns(3)
                 with col_del:
@@ -924,12 +965,12 @@ def check_gforce_safety(accel_df):
         'max_longitudinal': max_longitudinal
     }
 
-def compute_airtime_metrics(accel_df, floater_threshold=-0.2, flojector_threshold=-0.5):
+def compute_airtime_metrics(accel_df, floater_range=( -0.25, 0.25 ), flojector_range=( -0.75, -0.25 ), ejector_threshold=-0.75 ):
     """Compute airtime metrics from vertical g data.
     Categories (by vertical g in g-units):
-    - Floater: -0.2 <= g < 0.0 (light weightlessness)
-    - Flojector: -0.5 <= g < -0.2 (moderate negative g)
-    - Ejector: g < -0.5 (strong negative g)
+    - Floater Airtime: -0.25g <= Vertical <= 0.25g
+    - Flojector Airtime: -0.75g <= Vertical < -0.25g
+    - Ejector Airtime: Vertical < -0.75g
 
     Returns seconds for each category and total airtime.
     Thresholds can be tuned; uses time spacing from 'Time' column.
@@ -944,9 +985,11 @@ def compute_airtime_metrics(accel_df, floater_threshold=-0.2, flojector_threshol
     else:
         dt = float(np.median(np.diff(t)))
 
-    floater_mask = (g >= floater_threshold) & (g < 0.0)
-    flojector_mask = (g >= flojector_threshold) & (g < floater_threshold)
-    ejector_mask = (g < flojector_threshold)
+    flo_min, flo_max = floater_range
+    flj_min, flj_max = flojector_range
+    floater_mask = (g >= flo_min) & (g <= flo_max)
+    flojector_mask = (g >= flj_min) & (g < flj_max)
+    ejector_mask = (g < ejector_threshold)
 
     floater_time = float(floater_mask.sum() * dt)
     flojector_time = float(flojector_mask.sum() * dt)
@@ -1155,6 +1198,165 @@ if st.session_state.track_generated:
         )
         
         st.plotly_chart(fig_profile, use_container_width=True)
+        # Airtime Timeline directly below main plot
+        if 'accel_df' in st.session_state:
+            accel_df_tl = st.session_state.accel_df.copy()
+            t = accel_df_tl['Time'].values
+            g = accel_df_tl['Vertical'].values
+            flo_min, flo_max = -0.25, 0.25
+            flj_min, flj_max = -0.75, -0.25
+            flo_mask = (g >= flo_min) & (g <= flo_max)
+            flj_mask = (g >= flj_min) & (g < flj_max)
+            ej_mask = (g < -0.75)
+
+            def mask_to_intervals(mask, time_array):
+                intervals = []
+                if len(time_array) == 0:
+                    return intervals
+                prev = False
+                start = None
+                for i, m in enumerate(mask):
+                    if m and not prev:
+                        start = time_array[i]
+                    if prev and not m:
+                        end = time_array[i]
+                        intervals.append((start, end))
+                        start = None
+                    prev = m
+                if prev and start is not None:
+                    intervals.append((start, time_array[-1]))
+                return intervals
+
+            flo_int = mask_to_intervals(flo_mask, t)
+            flj_int = mask_to_intervals(flj_mask, t)
+            ej_int = mask_to_intervals(ej_mask, t)
+
+            import plotly.graph_objects as go
+            fig_tl = go.Figure()
+            if len(t):
+                fig_tl.add_trace(go.Scatter(x=[t[0], t[-1]], y=[3,3], mode='lines', line=dict(color='#e0e0e0', width=1), showlegend=False))
+                fig_tl.add_trace(go.Scatter(x=[t[0], t[-1]], y=[2,2], mode='lines', line=dict(color='#e0e0e0', width=1), showlegend=False))
+                fig_tl.add_trace(go.Scatter(x=[t[0], t[-1]], y=[1,1], mode='lines', line=dict(color='#e0e0e0', width=1), showlegend=False))
+
+            def add_band(intervals, y_top, y_bottom, color, name):
+                for (a, b) in intervals:
+                    fig_tl.add_shape(type='rect', x0=a, x1=b, y0=y_bottom, y1=y_top, fillcolor=color, opacity=0.6, line=dict(width=0))
+                fig_tl.add_trace(go.Scatter(x=[], y=[], name=name, mode='markers', marker=dict(color=color)))
+
+            add_band(ej_int, 3.2, 2.8, '#F44336', 'Ejector')
+            add_band(flj_int, 2.2, 1.8, '#FF9800', 'Flojector')
+            add_band(flo_int, 1.2, 0.8, '#4CAF50', 'Floater')
+
+            fig_tl.update_layout(
+                height=180,
+                margin=dict(l=10, r=10, t=5, b=10),
+                yaxis=dict(showticklabels=True, tickmode='array', tickvals=[1,2,3], ticktext=['Floater','Flojector','Ejector'], range=[0.5,3.5]),
+                xaxis_title='Time (s)'
+            )
+            st.plotly_chart(fig_tl, use_container_width=True)
+
+            # Particle Simulation along the track (on-demand)
+            st.markdown("**🎬 Particle Simulation (Track Traversal)**")
+            run_sim = st.button("Run Particle Simulation")
+            if run_sim and 'accel_df' in st.session_state and 'track_x' in st.session_state and 'track_y' in st.session_state:
+                sim_time = st.session_state.accel_df['Time'].values
+                x = np.array(st.session_state.track_x)
+                y = np.array(st.session_state.track_y)
+                n = len(x)
+                # Build fractional indices across the track to avoid stalls between points
+                if len(sim_time) <= 1 or n <= 1:
+                    st.info("Not enough points to simulate.")
+                else:
+                    idx_float = np.linspace(0, n - 1, len(sim_time))
+                    i0 = np.floor(idx_float).astype(int)
+                    i1 = np.minimum(i0 + 1, n - 1)
+                    alpha = idx_float - i0
+                    xp = x[i0] * (1 - alpha) + x[i1] * alpha
+                    yp = y[i0] * (1 - alpha) + y[i1] * alpha
+                    # Compute smooth tangents from interpolated points using central differences
+                    tx = np.zeros_like(xp)
+                    ty = np.zeros_like(yp)
+                    for k in range(len(xp)):
+                        if k == 0:
+                            dxk = xp[1] - xp[0]
+                            dyk = yp[1] - yp[0]
+                        elif k == len(xp) - 1:
+                            dxk = xp[-1] - xp[-2]
+                            dyk = yp[-1] - yp[-2]
+                        else:
+                            dxk = xp[k + 1] - xp[k - 1]
+                            dyk = yp[k + 1] - yp[k - 1]
+                        normk = np.hypot(dxk, dyk)
+                        if normk == 0:
+                            tx[k], ty[k] = 1.0, 0.0
+                        else:
+                            tx[k], ty[k] = dxk / normk, dyk / normk
+                    # Normals from tangents
+                    nx = -ty
+                    ny = tx
+                    # Enforce normal continuity to avoid flips at segment boundaries
+                    for k in range(1, len(nx)):
+                        if nx[k - 1] * nx[k] + ny[k - 1] * ny[k] < 0:
+                            nx[k] = -nx[k]
+                            ny[k] = -ny[k]
+
+                    import plotly.graph_objects as go
+                    # Use the same vertical g column as other plots: 'Vertical'
+                    df = st.session_state.accel_df
+                    vert_g = df['Vertical'].values if 'Vertical' in df.columns else None
+                    # Scale factor for arrow length per 1g
+                    arrow_scale = 2.0
+                    # Downsample frames if very long to keep UI responsive
+                    max_frames = 900
+                    if len(xp) > max_frames:
+                        step = int(np.ceil(len(xp) / max_frames))
+                    else:
+                        step = 1
+                    frames = []
+                    for i in range(0, len(xp), step):
+                        # Use precomputed smooth normals
+                        nxi, nyi = nx[i], ny[i]
+                        # Acceleration vector along normal using vertical g if available
+                        if vert_g is not None and i < len(vert_g):
+                            axv = arrow_scale * vert_g[i] * nxi
+                            ayv = arrow_scale * vert_g[i] * nyi
+                            accel_trace = go.Scatter(x=[xp[i], xp[i] + axv], y=[yp[i], yp[i] + ayv], mode='lines',
+                                                     line=dict(color='#2ca02c', width=3), name='Acceleration')
+                        else:
+                            accel_trace = go.Scatter(x=[xp[i], xp[i]], y=[yp[i], yp[i]], mode='lines',
+                                                     line=dict(color='#2ca02c', width=3), name='Acceleration')
+                        frames.append(go.Frame(data=[
+                            go.Scatter(x=x, y=y, mode='lines', line=dict(color='rgb(255,75,75)', width=3), name='Track'),
+                            go.Scatter(x=[xp[i]], y=[yp[i]], mode='markers', marker=dict(size=12, color='#1f77b4'), name='Particle'),
+                            accel_trace
+                        ], name=str(i)))
+
+                    fig_sim = go.Figure(
+                        data=[
+                            go.Scatter(x=x, y=y, mode='lines', line=dict(color='rgb(255,75,75)', width=3), name='Track'),
+                            go.Scatter(x=[xp[0]], y=[yp[0]], mode='markers', marker=dict(size=12, color='#1f77b4'), name='Particle')
+                        ],
+                        frames=frames
+                    )
+                    # Add initial acceleration vector to match frame traces if available
+                    # Initial acceleration vector using smooth normal
+                    if vert_g is not None and len(vert_g) > 0:
+                        axv0 = arrow_scale * vert_g[0] * nx[0]
+                        ayv0 = arrow_scale * vert_g[0] * ny[0]
+                        fig_sim.add_trace(go.Scatter(x=[xp[0], xp[0] + axv0], y=[yp[0], yp[0] + ayv0], mode='lines',
+                                                     line=dict(color='#2ca02c', width=3), name='Acceleration'))
+                    fig_sim.update_layout(
+                        xaxis_title='Distance (m)', yaxis_title='Height (m)',
+                        height=300, margin=dict(l=20, r=20, t=30, b=20),
+                        updatemenus=[{
+                            'type': 'buttons',
+                            'buttons': [
+                                {'label': 'Play', 'method': 'animate', 'args': [None, {'fromcurrent': True, 'frame': {'duration': 30, 'redraw': True}, 'transition': {'duration': 0}}]},
+                                {'label': 'Pause', 'method': 'animate', 'args': [[None], {'mode': 'immediate', 'transition': {'duration': 0}, 'frame': {'duration': 0, 'redraw': False}}]}
+                            ]
+                        }]
+                    )
+                    st.plotly_chart(fig_sim, use_container_width=True)
     
     with col2:
         st.markdown("**Track Statistics**")
@@ -1415,6 +1617,14 @@ if st.session_state.track_generated:
         # Lateral vs Vertical egg
         with col_egg1:
             fig_egg_lv = go.Figure()
+            fig_egg_lv.add_trace(go.Scatter(
+                x=accel_df['Lateral'], y=accel_df['Vertical'],
+                mode='markers', marker=dict(size=4, color=accel_df['Time'], colorscale='Viridis'),
+                name='Samples',
+                hovertemplate='Lat: %{x:.2f} g<br>Vert: %{y:.2f} g<extra></extra>'
+            ))
+            # (Airtime Timeline moved below main plot; removed here)
+            # Resume egg plot samples scatter
             fig_egg_lv.add_trace(go.Scatter(
                 x=accel_df['Lateral'], y=accel_df['Vertical'],
                 mode='markers', marker=dict(size=4, color=accel_df['Time'], colorscale='Viridis'),

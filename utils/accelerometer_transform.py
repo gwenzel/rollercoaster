@@ -147,11 +147,11 @@ def compute_rider_accelerations(track_df):
     # Gravity vector (in world frame)
     gravity = np.array([0, -g, 0])
     
-    # Total acceleration in world frame
-    # a_total = a_tangential * T + a_centripetal * N + gravity
-    a_world_x = a_tangential * tangent_x + a_centripetal * normal_x + gravity[0]
-    a_world_y = a_tangential * tangent_y + a_centripetal * normal_y + gravity[1]
-    a_world_z = a_tangential * tangent_z + a_centripetal * normal_z + gravity[2]
+    # Total acceleration in world frame (exclude gravity here; add it via vertical projection below)
+    # a_total = a_tangential * T + a_centripetal * N
+    a_world_x = a_tangential * tangent_x + a_centripetal * normal_x
+    a_world_y = a_tangential * tangent_y + a_centripetal * normal_y
+    a_world_z = a_tangential * tangent_z + a_centripetal * normal_z
     
     # Transform to rider's reference frame
     # Longitudinal = projection onto tangent (forward direction)
@@ -169,7 +169,7 @@ def compute_rider_accelerations(track_df):
                  a_world_y * normal_y + 
                  a_world_z * normal_z)
     
-    # Add gravity component in vertical direction
+    # Add gravity component in vertical direction only
     # The rider feels gravity as part of the vertical acceleration
     gravity_vertical = -(gravity[0] * normal_x + 
                         gravity[1] * normal_y + 
