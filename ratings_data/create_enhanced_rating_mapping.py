@@ -6,6 +6,7 @@ This reduces false positives from common coaster names like "Boomerang" or "Wild
 import pandas as pd
 import os
 from difflib import SequenceMatcher
+import glob
 
 def normalize_name(name):
     """Normalize coaster/park name for matching"""
@@ -29,7 +30,7 @@ def similarity_score(name1, name2):
     norm2 = normalize_name(name2)
     return SequenceMatcher(None, norm1, norm2).ratio()
 
-def combined_similarity(coaster_name1, park_name1, coaster_name2, park_name2, 
+def combined_similarity(coaster_name1, park_name1, coaster_name2, park_name2, pyton
                        coaster_weight=0.7, park_weight=0.3):
     """
     Calculate combined similarity using both coaster and park names.
@@ -195,6 +196,33 @@ def main():
     print()
     mapping_df, unmatched_df = create_enhanced_mapping(ratings_df, rfdb_df)
     
+    # Attempt to enrich with physical specs (height/speed/length) from latest enriched distributions CSV
+    try:
+        pattern = os.path.join('star_ratings_per_rc', 'rating_distributions_full_*_enriched.csv')
+        enriched_files = glob.glob(pattern)
+        if enriched_files:
+            enriched_files.sort()
+            enriched_csv = enriched_files[-1]
+            enr_df = pd.read_csv(enriched_csv)
+            if 'coaster_id' in enr_df.columns:
+                keep_cols = ['coaster_id']
+                for c in ['height_m', 'speed_kmh', 'track_length_m']:
+                    if c in enr_df.columns:
+                        keep_cols.append(c)
+                enr_keep = enr_df[keep_cols].copy()
+                # Drop pre-existing spec columns if present to avoid duplicates
+                for c in ['height_m', 'speed_kmh', 'track_length_m']:
+                    if c in mapping_df.columns:
+                        mapping_df.drop(columns=[c], inplace=True)
+                mapping_df = mapping_df.merge(enr_keep, on='coaster_id', how='left')
+                print(f"✓ Enriched mapping with specs from: {enriched_csv}")
+            else:
+                print("⚠ Enriched CSV missing 'coaster_id'; skipping spec merge")
+        else:
+            print("ℹ No enriched distributions CSV found; skipping spec merge")
+    except Exception as _enr_e:
+        print(f"⚠ Spec merge failed: {_enr_e}")
+
     # Save results
     output_file = 'rating_to_rfdb_mapping_enhanced.csv'
     mapping_df.to_csv(output_file, index=False)
@@ -230,6 +258,11 @@ def main():
     print(f"  Data availability:")
     print(f"    Total CSV files: {mapping_df['csv_count'].sum()}")
     print(f"    Average per coaster: {mapping_df['csv_count'].mean():.1f}")
+    # Specs availability summary
+    for c in ['height_m', 'speed_kmh', 'track_length_m']:
+        if c in mapping_df.columns:
+            avail = mapping_df[c].notna().sum()
+            print(f"    {c}: available for {avail} coasters")
     
     # Check for duplicate RFDB mappings
     print()
