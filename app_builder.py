@@ -16,44 +16,20 @@ import os
 from utils.accelerometer_transform import track_to_accelerometer_data
 from utils.bigru_predictor import predict_score_bigru
 from utils.track_library import ensure_library, pick_random_entry, load_entry, add_entry
-
-st.set_page_config(
-    page_title="Roller Coaster Builder",
-    page_icon="🎢",
-    layout="wide"
+from utils.track_blocks import (
+    lift_hill_profile,
+    vertical_drop_profile,
+    loop_profile,
+    airtime_hill_profile,
+    spiral_profile,
+    banked_turn_profile,
+    bunny_hop_profile,
+    flat_section_profile,
 )
 
-# Custom CSS
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 3rem;
-        font-weight: bold;
-        text-align: center;
-        color: #FF4B4B;
-        margin-bottom: 1rem;
-    }
-    .block-card {
-        background-color: #f8f9fa;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        border: 2px solid #dee2e6;
-        margin-bottom: 1rem;
-    }
-    .rating-display {
-        font-size: 3.5rem;
-        font-weight: bold;
-        text-align: center;
-        color: #FFD700;
-        margin: 1rem 0;
-    }
-    .stButton button {
-        width: 100%;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown('<div class="main-header">🎢 Roller Coaster Builder</div>', unsafe_allow_html=True)
+# Set page layout and main header
+st.set_page_config(page_title="Roller Coaster Builder", page_icon="🎢", layout="wide")
+st.title("🎢 Roller Coaster Builder")
 
 # ============================================================================
 # BUILDING BLOCK DEFINITIONS
@@ -66,46 +42,22 @@ class TrackBlock:
         self.description = description
         self.icon = icon
         self.base_profile_func = base_profile_func
-        
+    
     def generate_profile(self, **params):
         """Generate track profile with given parameters"""
         return self.base_profile_func(**params)
 
-from utils.track_blocks import (
-    lift_hill_profile,
-    vertical_drop_profile,
-    loop_profile,
-    airtime_hill_profile,
-    spiral_profile,
-    banked_turn_profile,
-    bunny_hop_profile,
-    flat_section_profile,
-)
-
- 
-
 # Define all available blocks
 BLOCK_LIBRARY = {
-    "lift_hill": TrackBlock("Lift Hill", "Chain lift to initial height", "⛰️", lift_hill_profile),
-    "drop": TrackBlock("Vertical Drop", "Steep initial drop", "⬇️", vertical_drop_profile),
-    "loop": TrackBlock("Clothoid Loop", "Smooth clothoid loop element", "🔄", loop_profile),
-    "airtime_hill": TrackBlock("Airtime Hill", "Floater airtime moment", "🎈", airtime_hill_profile),
-    "spiral": TrackBlock("Spiral", "Helix/corkscrew element", "🌀", spiral_profile),
-    "bunny_hop": TrackBlock("Bunny Hop", "Quick airtime bump", "🐰", bunny_hop_profile),
-    "banked_turn": TrackBlock("Banked Turn", "High-speed turn", "↪️", banked_turn_profile),
-    "flat_section": TrackBlock("Flat Section", "Brake/station run", "➡️", flat_section_profile),
-}
-
-# ============================================================================
-# SESSION STATE INITIALIZATION
-# ============================================================================
-
-# Always initialize with default template
-if 'track_sequence' not in st.session_state:
-    st.session_state.track_sequence = []
-
-if 'track_generated' not in st.session_state:
-    st.session_state.track_generated = False
+        "lift_hill": TrackBlock("Lift Hill", "Chain lift to initial height", "⛰️", lift_hill_profile),
+        "drop": TrackBlock("Vertical Drop", "Steep initial drop", "⬇️", vertical_drop_profile),
+        "loop": TrackBlock("Clothoid Loop", "Smooth clothoid loop element", "🔄", loop_profile),
+        "airtime_hill": TrackBlock("Airtime Hill", "Floater airtime moment", "🎈", airtime_hill_profile),
+        "spiral": TrackBlock("Spiral", "Helix/corkscrew element", "🌀", spiral_profile),
+        "bunny_hop": TrackBlock("Bunny Hop", "Quick airtime bump", "🐰", bunny_hop_profile),
+        "banked_turn": TrackBlock("Banked Turn", "High-speed turn", "↪️", banked_turn_profile),
+        "flat_section": TrackBlock("Flat Section", "Brake/station run", "➡️", flat_section_profile),
+    }
 
 # Always start with default curve on first load
 if 'initialized' not in st.session_state:
@@ -119,20 +71,11 @@ if 'initialized' not in st.session_state:
             'type': 'flat_section',
             'block': BLOCK_LIBRARY['flat_section'],
             'params': {'length': 30}
-        },
-        {
-            'type': 'loop',
-            'block': BLOCK_LIBRARY['loop'],
-            'params': {'diameter': 24}
-        },
-        {
-            'type': 'flat_section',
-            'block': BLOCK_LIBRARY['flat_section'],
-            'params': {'length': 25}
         }
     ]
     st.session_state.initialized = True
-    st.session_state.track_generated = False
+
+# The rest of the Builder UI continues below (unchanged code)...
 
 # ============================================================================
 # SIDEBAR: BUILDING BLOCK PALETTE
@@ -294,76 +237,30 @@ with st.sidebar:
             st.success("🔄 Reset to default template!")
             st.rerun()
 
-    # Precomputed safe library
-    st.subheader("📚 Precomputed Safe Library")
-    try:
-        # Refresh control
-        col_refresh = st.columns([1])[0]
-        if col_refresh.button("🔄 Refresh Library", use_container_width=True):
-            # Re-scan and rebuild metadata if needed, then rerun UI
-            ensure_library(dt=0.02)
-            st.success("Library refreshed")
-            st.rerun()
-
-        library_entries = ensure_library(dt=0.02)
-        names = [e['name'] for e in library_entries] if library_entries else []
-        selected_name = st.selectbox("Select saved design", options=names, index=0 if names else None)
-        if st.button("📦 Load + Apply Selected", use_container_width=True) and selected_name:
-            entry = next((e for e in library_entries if e['name'] == selected_name), None)
-            if entry:
-                # Load geometry + physics
-                geo, phys = load_entry(entry)
-                pts = geo['points']
-                st.session_state.track_x = pts[:,0]
-                st.session_state.track_y = pts[:,1]
-                if pts.shape[1] >= 3:
-                    st.session_state.track_z = pts[:,2].tolist()
-                st.session_state.track_generated = True
-                n = pts.shape[0]
-                dt = 0.02
-                time = np.arange(n) * dt
-                accel_df = pd.DataFrame({
-                    'Time': time,
-                    'Vertical': phys['f_vert_g'],
-                    'Lateral': phys['f_lat_g'],
-                    'Longitudinal': phys['f_long_g'],
-                })
-                st.session_state.accel_df = accel_df
-
-                # Apply elements to builder for editing
-                st.session_state.track_sequence = [
-                    {
-                        'type': e['type'],
-                        'block': BLOCK_LIBRARY[e['type'] if e['type'] in BLOCK_LIBRARY else 'flat_section'],
-                        'params': e['params']
-                    }
-                    for e in entry.get('elements', [])
-                ]
-                st.success(f"Loaded and applied: {entry['name']}")
-                st.rerun()
-    except Exception as _lib_e:
-        st.caption("Library unavailable; continuing without precomputed tracks.")
+    # Precomputed safe library (hidden)
+    # st.subheader("📚 Precomputed Safe Library")
+    # Hidden per request. Library UI and loading disabled.
     
     st.divider()
     
-    # Save current design to precomputed library
-    st.subheader("💾 Save Design")
-    new_lib_name = st.text_input("Entry name", value="my_design")
-    if st.button("📚 Add Design to Library", use_container_width=True, help="Save current track with physics to the library"):
-        if st.session_state.get('track_generated'):
-            track_df = pd.DataFrame({
-                'x': st.session_state.track_x,
-                'y': st.session_state.track_y,
-                'z': np.array(st.session_state.get('track_z', np.zeros_like(st.session_state.track_x)))
-            })
-            elements = st.session_state.get('track_sequence', [])
-            meta = add_entry(new_lib_name, elements, track_df)
-            if meta:
-                st.success(f"Saved to library as '{new_lib_name}'")
-            else:
-                st.error("Failed to save to library")
-        else:
-            st.warning("Generate a track first, then save.")
+    # Save current design to precomputed library (hidden per request)
+    # st.subheader("💾 Save Design")
+    # new_lib_name = st.text_input("Entry name", value="my_design")
+    # if st.button("📚 Add Design to Library", use_container_width=True, help="Save current track with physics to the library"):
+    #     if st.session_state.get('track_generated'):
+    #         track_df = pd.DataFrame({
+    #             'x': st.session_state.track_x,
+    #             'y': st.session_state.track_y,
+    #             'z': np.array(st.session_state.get('track_z', np.zeros_like(st.session_state.track_x)))
+    #         })
+    #         elements = st.session_state.get('track_sequence', [])
+    #         meta = add_entry(new_lib_name, elements, track_df)
+    #         if meta:
+    #             st.success(f"Saved to library as '{new_lib_name}'")
+    #         else:
+    #             st.error("Failed to save to library")
+    #     else:
+    #         st.warning("Generate a track first, then save.")
 
     st.markdown("""
     <div style="background-color: #e3f2fd; padding: 0.8rem; border-radius: 0.3rem; margin-bottom: 1rem; color: #1a1a1a;">
@@ -384,6 +281,7 @@ with st.sidebar:
         options=list(BLOCK_LIBRARY.keys()),
         format_func=lambda x: f"{BLOCK_LIBRARY[x].icon} {BLOCK_LIBRARY[x].name}"
     )
+    # RFDB analysis moved to multipage app under pages/02_RFDB_Data.py
     
     selected_block = BLOCK_LIBRARY[selected_block_key]
     
@@ -823,7 +721,8 @@ def generate_track_from_blocks():
     all_x = np.array(all_x)
     all_y = np.array(all_y)
 
-    st.session_state.joint_smoothing_applied = f"✓ Blended {joints_count} joints (cubic)"
+    # Hide blended joints message
+    st.session_state.joint_smoothing_applied = None
     st.session_state.smoothness_warning = None
     _, final_curvature = detect_curvature_spikes(all_x, all_y)
     st.session_state.track_curvature = final_curvature
@@ -1456,11 +1355,8 @@ if st.session_state.track_generated:
     
     st.divider()
     
-    # Show joint smoothing info
+    # Show smoothness warnings (joint info hidden)
     info_col1, info_col2 = st.columns(2)
-    with info_col1:
-        if hasattr(st.session_state, 'joint_smoothing_applied'):
-            st.info(st.session_state.joint_smoothing_applied)
     with info_col2:
         if hasattr(st.session_state, 'smoothness_warning') and st.session_state.smoothness_warning:
             st.warning(st.session_state.smoothness_warning)
@@ -1603,168 +1499,6 @@ if st.session_state.track_generated:
     if 'accel_df' in st.session_state:
         accel_df = st.session_state.accel_df
         st.divider()
-        st.markdown("**Egg Plots (Comfort Envelopes)**")
-
-        import plotly.graph_objects as go
-
-        # Helper to make an ellipse path
-        def ellipse_points(rx, ry, n=180):
-            t = np.linspace(0, 2*np.pi, n)
-            return rx*np.cos(t), ry*np.sin(t)
-
-        col_egg1, col_egg2, col_egg3 = st.columns(3)
-
-        # Lateral vs Vertical egg
-        with col_egg1:
-            fig_egg_lv = go.Figure()
-            fig_egg_lv.add_trace(go.Scatter(
-                x=accel_df['Lateral'], y=accel_df['Vertical'],
-                mode='markers', marker=dict(size=4, color=accel_df['Time'], colorscale='Viridis'),
-                name='Samples',
-                hovertemplate='Lat: %{x:.2f} g<br>Vert: %{y:.2f} g<extra></extra>'
-            ))
-            # (Airtime Timeline moved below main plot; removed here)
-            # Resume egg plot samples scatter
-            fig_egg_lv.add_trace(go.Scatter(
-                x=accel_df['Lateral'], y=accel_df['Vertical'],
-                mode='markers', marker=dict(size=4, color=accel_df['Time'], colorscale='Viridis'),
-                name='Samples',
-                hovertemplate='Lat: %{x:.2f} g<br>Vert: %{y:.2f} g<extra></extra>'
-            ))
-            ex, ey = ellipse_points(2.0, 3.0)
-            fig_egg_lv.add_trace(go.Scatter(x=ex, y=ey, mode='lines', line=dict(color='green'), name='Comfort'))
-            ex2, ey2 = ellipse_points(3.5, 4.5)
-            fig_egg_lv.add_trace(go.Scatter(x=ex2, y=ey2, mode='lines', line=dict(color='orange', dash='dash'), name='Intense'))
-            ex3, ey3 = ellipse_points(5.0, 6.0)
-            fig_egg_lv.add_trace(go.Scatter(x=ex3, y=ey3, mode='lines', line=dict(color='red', dash='dot'), name='Danger'))
-            # Set equal aspect ratio and fixed symmetric ranges for circular look
-            fixed_r = 6.0
-            fig_egg_lv.update_layout(
-                title='Lat vs Vert (g)', xaxis_title='Lateral (g)', yaxis_title='Vertical (g)',
-                height=360, width=360, margin=dict(l=10, r=10, t=30, b=10),
-                xaxis=dict(range=[-fixed_r, fixed_r], scaleanchor='y', scaleratio=1),
-                yaxis=dict(range=[-fixed_r, fixed_r])
-            )
-            st.plotly_chart(fig_egg_lv, use_container_width=False)
-
-        # Longitudinal vs Vertical egg
-        with col_egg2:
-            fig_egg_lv2 = go.Figure()
-            fig_egg_lv2.add_trace(go.Scatter(
-                x=accel_df['Longitudinal'], y=accel_df['Vertical'],
-                mode='markers', marker=dict(size=4, color=accel_df['Time'], colorscale='Viridis'),
-                name='Samples',
-                hovertemplate='Long: %{x:.2f} g<br>Vert: %{y:.2f} g<extra></extra>'
-            ))
-            exa, eya = ellipse_points(3.0, 3.0)
-            fig_egg_lv2.add_trace(go.Scatter(x=exa, y=eya, mode='lines', line=dict(color='green'), name='Comfort'))
-            exa2, eya2 = ellipse_points(4.0, 4.5)
-            fig_egg_lv2.add_trace(go.Scatter(x=exa2, y=eya2, mode='lines', line=dict(color='orange', dash='dash'), name='Intense'))
-            exa3, eya3 = ellipse_points(6.0, 6.0)
-            fig_egg_lv2.add_trace(go.Scatter(x=exa3, y=eya3, mode='lines', line=dict(color='red', dash='dot'), name='Danger'))
-            # Equal aspect ratio and fixed symmetric ranges
-            fixed_r2 = 6.0
-            fig_egg_lv2.update_layout(
-                title='Long vs Vert (g)', xaxis_title='Longitudinal (g)', yaxis_title='Vertical (g)',
-                height=360, width=360, margin=dict(l=10, r=10, t=30, b=10),
-                xaxis=dict(range=[-fixed_r2, fixed_r2], scaleanchor='y', scaleratio=1),
-                yaxis=dict(range=[-fixed_r2, fixed_r2])
-            )
-            st.plotly_chart(fig_egg_lv2, use_container_width=False)
-
-        # Lateral vs Longitudinal egg
-        with col_egg3:
-            fig_egg_ll = go.Figure()
-            fig_egg_ll.add_trace(go.Scatter(
-                x=accel_df['Lateral'], y=accel_df['Longitudinal'],
-                mode='markers', marker=dict(size=4, color=accel_df['Time'], colorscale='Viridis'),
-                name='Samples',
-                hovertemplate='Lat: %{x:.2f} g<br>Long: %{y:.2f} g<extra></extra>'
-            ))
-            exb, eyb = ellipse_points(2.0, 3.0)
-            fig_egg_ll.add_trace(go.Scatter(x=exb, y=eyb, mode='lines', line=dict(color='green'), name='Comfort'))
-            exb2, eyb2 = ellipse_points(3.5, 4.0)
-            fig_egg_ll.add_trace(go.Scatter(x=exb2, y=eyb2, mode='lines', line=dict(color='orange', dash='dash'), name='Intense'))
-            exb3, eyb3 = ellipse_points(5.0, 6.0)
-            fig_egg_ll.add_trace(go.Scatter(x=exb3, y=eyb3, mode='lines', line=dict(color='red', dash='dot'), name='Danger'))
-            # Equal aspect ratio and fixed symmetric ranges
-            fixed_r3 = 6.0
-            fig_egg_ll.update_layout(
-                title='Lat vs Long (g)', xaxis_title='Lateral (g)', yaxis_title='Longitudinal (g)',
-                height=360, width=360, margin=dict(l=10, r=10, t=30, b=10),
-                xaxis=dict(range=[-fixed_r3, fixed_r3], scaleanchor='y', scaleratio=1),
-                yaxis=dict(range=[-fixed_r3, fixed_r3])
-            )
-            st.plotly_chart(fig_egg_ll, use_container_width=False)
-    
-    st.divider()
-    
-    # Row 3: G-Force Safety Analysis
-    if 'accel_df' in st.session_state:
-        accel_df = st.session_state.accel_df
-        safety = check_gforce_safety(accel_df)
-        
-        st.subheader(f"{safety['emoji']} G-Force Safety Analysis")
-        
-        # Safety status banner
-        if safety['color'] == 'error':
-            st.error(f"**Safety Level: {safety['level']}**")
-        elif safety['color'] == 'warning':
-            st.warning(f"**Safety Level: {safety['level']}**")
-        else:
-            st.success(f"**Safety Level: {safety['level']}**")
-        
-        # Show all dangers first
-        if safety['dangers']:
-            st.error("**⚠️ CRITICAL SAFETY ISSUES:**")
-            for danger in safety['dangers']:
-                st.markdown(f"- {danger}")
-        
-        # Show warnings
-        if safety['warnings']:
-            if not safety['dangers']:  # Only show warning box if no dangers
-                st.warning("**⚠️ Safety Warnings:**")
-            for warning in safety['warnings']:
-                st.markdown(f"- {warning}")
-        
-        # If no issues, show positive message
-        if not safety['warnings'] and not safety['dangers']:
-            st.info("✅ All g-forces within comfortable limits for riders")
-    
-    st.divider()
-    
-    # Row 4: Detailed Ride Statistics
-    st.subheader("📊 Detailed Ride Statistics")
-    
-    col5, col6, col7, col8 = st.columns(4)
-    
-    if 'accel_df' in st.session_state:
-        accel_df = st.session_state.accel_df
-        safety = check_gforce_safety(accel_df)
-        
-        # Color-code metrics based on safety
-        max_g_vert = safety['max_vertical']
-        min_g_vert = safety['min_vertical']
-        max_g_lat = safety['max_lateral']
-        max_g_long = safety['max_longitudinal']
-        
-        # Determine colors
-        vert_color = "🚨" if max_g_vert > 5 else ("⚠️" if max_g_vert > 3 else "✅")
-        neg_color = "🚨" if min_g_vert < -3 else ("⚠️" if min_g_vert < -2 else "✅")
-        lat_color = "🚨" if max_g_lat > 5 else ("⚠️" if max_g_lat > 2 else "✅")
-        
-        col5.metric("Max Vertical G", f"{max_g_vert:.2f}g {vert_color}")
-        col6.metric("Min Vertical G", f"{min_g_vert:.2f}g {neg_color}")
-        col7.metric("Max Lateral G", f"{max_g_lat:.2f}g {lat_color}")
-        col8.metric("Ride Duration", f"{accel_df['Time'].max():.1f}s")
-        
-        # Airtime detection
-        airtime_mask = accel_df['Vertical'] < -0.1
-        airtime_seconds = np.sum(airtime_mask) * 0.1
-        
-        if airtime_seconds > 0:
-            st.success(f"🎈 **Airtime Detected:** {airtime_seconds:.1f} seconds of negative G-forces!")
-
     # Bottom: On-demand 3D view (resource heavy)
     st.divider()
     st.subheader("🧭 On-Demand 3D View")
