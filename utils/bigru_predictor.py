@@ -32,11 +32,16 @@ class StreamlitBiGRUPredictor:
     
     def _load_model(self):
         """Load the trained model from notebook-generated format."""
+        # Fallback to notebook-saved path if default doesn't exist
         if not os.path.exists(self.model_path):
-            raise FileNotFoundError(
-                f"Model file not found: {self.model_path}\n"
-                "Please train a model first using the BiGRU notebook"
-            )
+            alt_path = os.path.join("models", "bigru_rating_model.pth")
+            if os.path.exists(alt_path):
+                self.model_path = alt_path
+            else:
+                raise FileNotFoundError(
+                    f"Model file not found: {self.model_path}\n"
+                    "Please train a model first using the BiGRU notebook"
+                )
         
         import torch
         import torch.nn as nn
@@ -128,20 +133,32 @@ class StreamlitBiGRUPredictor:
         self.predictor.input_size = checkpoint.get('input_size', 3)
         self.predictor.seq_length = checkpoint.get('seq_length', 100)
         
-        # Create and load model with notebook architecture
-        self.predictor.model = BiGRURegressor().to(device)
-        # Accept either keyed or raw state_dict formats
-        state_dict = checkpoint.get('model_state_dict', None)
-        if state_dict is None:
-            # If file is a raw state_dict, use it directly
-            if all(isinstance(k, str) for k in checkpoint.keys()):
-                state_dict = checkpoint
-            else:
-                raise KeyError(
-                    "Checkpoint missing 'model_state_dict' and not a raw state_dict. "
-                    "Please save with model_state_dict or provide a compatible file."
-                )
-        self.predictor.model.load_state_dict(state_dict)
+        # Prefer loading an existing serialized model object if present
+        model_obj = checkpoint.get('model', None)
+        if isinstance(model_obj, torch.nn.Module):
+            self.predictor.model = model_obj.to(device)
+        else:
+            # Create and load model with notebook architecture (match saved config if present)
+            cfg = checkpoint.get('model_config', {})
+            self.predictor.model = BiGRURegressor(
+                input_size_accel=cfg.get('accel_input_size', 3),
+                input_size_airtime=cfg.get('airtime_feature_size', 4),
+                hidden_size=cfg.get('hidden_dim', 128),
+                num_layers=cfg.get('num_layers', 1),
+                dropout=cfg.get('dropout_rate', 0.3),
+            ).to(device)
+            # Accept either keyed or raw state_dict formats
+            state_dict = checkpoint.get('model_state_dict', None)
+            if state_dict is None:
+                # If file is a raw state_dict, use it directly
+                if all(isinstance(k, str) for k in checkpoint.keys()):
+                    state_dict = checkpoint
+                else:
+                    raise KeyError(
+                        "Checkpoint missing 'model_state_dict' and not a raw state_dict. "
+                        "Please save with model_state_dict or provide a compatible file."
+                    )
+            self.predictor.model.load_state_dict(state_dict)
         self.predictor.model.eval()
         
         print(f"✓ Model loaded from {self.model_path}")
@@ -209,8 +226,8 @@ class StreamlitBiGRUPredictor:
             
             # Denormalize prediction if rating scaler available; else use raw
             pred_np = prediction_normalized.cpu().numpy().reshape(-1, 1)
-            if self.predictor.scaler_score is not None:
-                prediction = self.predictor.scaler_score.inverse_transform(pred_np)[0, 0]
+            if self.predictor.scaler_rating is not None:
+                prediction = self.predictor.scaler_rating.inverse_transform(pred_np)[0, 0]
             else:
                 prediction = float(pred_np[0, 0])
             

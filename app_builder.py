@@ -24,6 +24,7 @@ from utils.track_blocks import (
     spiral_profile,
     banked_turn_profile,
     bunny_hop_profile,
+    launch_profile,
     flat_section_profile,
 )
 
@@ -56,21 +57,37 @@ BLOCK_LIBRARY = {
         "spiral": TrackBlock("Spiral", "Helix/corkscrew element", "🌀", spiral_profile),
         "bunny_hop": TrackBlock("Bunny Hop", "Quick airtime bump", "🐰", bunny_hop_profile),
         "banked_turn": TrackBlock("Banked Turn", "High-speed turn", "↪️", banked_turn_profile),
+        "launch": TrackBlock("Launch Section", "Magnetic acceleration boost (LSM/LIM)", "🚀", launch_profile),
         "flat_section": TrackBlock("Flat Section", "Brake/station run", "➡️", flat_section_profile),
     }
 
-# Always start with default curve on first load
+# Always start with a complete starter track on first load
 if 'initialized' not in st.session_state:
     st.session_state.track_sequence = [
+        {
+            'type': 'lift_hill',
+            'block': BLOCK_LIBRARY['lift_hill'],
+            'params': {'length': 40, 'height': 30}
+        },
         {
             'type': 'drop',
             'block': BLOCK_LIBRARY['drop'],
             'params': {'height': 30, 'steepness': 0.85}
         },
         {
+            'type': 'loop',
+            'block': BLOCK_LIBRARY['loop'],
+            'params': {'diameter': 25}
+        },
+        {
+            'type': 'airtime_hill',
+            'block': BLOCK_LIBRARY['airtime_hill'],
+            'params': {'length': 35, 'height': 12}
+        },
+        {
             'type': 'flat_section',
             'block': BLOCK_LIBRARY['flat_section'],
-            'params': {'length': 30}
+            'params': {'length': 40}
         }
     ]
     st.session_state.initialized = True
@@ -122,7 +139,8 @@ with st.sidebar:
             ]
             
             # Available blocks (after initial drop + flat)
-            available_blocks = ['drop', 'loop', 'airtime_hill', 'spiral', 'bunny_hop', 'banked_turn']
+            # Exclude banked_turn and spiral to avoid lateral forces in random designs
+            available_blocks = ['drop', 'loop', 'airtime_hill', 'bunny_hop', 'launch']
 
             # Record the initial drop height to cap later drops to <= 1/3
             first_drop_height = next((b['params']['height'] for b in new_sequence if b['type'] == 'drop'), None)
@@ -170,6 +188,11 @@ with st.sidebar:
                     params = {
                         'radius': random.randint(20, 40),
                         'angle': random.randint(60, 120)
+                    }
+                elif block_type == 'launch':
+                    params = {
+                        'length': random.randint(30, 60),
+                        'speed_boost': random.randint(15, 30)
                     }
                 elif block_type == 'flat_section':
                     params = {
@@ -323,6 +346,12 @@ with st.sidebar:
         params['radius'] = st.slider("Turn Radius (m)", 15, 50, 30, 5)
         params['angle'] = st.slider("Turn Angle (°)", 30, 180, 90, 15)
         
+    elif selected_block_key == "launch":
+        params['length'] = st.slider("Launch Length (m)", 20, 80, 40, 5)
+        params['speed_boost'] = st.slider("Speed Boost (m/s)", 10, 40, 20, 5)
+        st.caption(f"💡 Target speed: {params['speed_boost']*3.6:.0f} km/h")
+        st.info("🚀 Launch adds energy to the system, enabling higher speeds and more intense elements!")
+        
     elif selected_block_key == "flat_section":
         params['length'] = st.slider("Section Length (m)", 10, 50, 30, 5)
     
@@ -331,14 +360,16 @@ with st.sidebar:
         # Get current height for drop validation
         if selected_block_key == "drop" and len(st.session_state.track_sequence) > 0:
             # Calculate current height from existing track
-            all_x, all_y = [], []
-            current_x_offset, current_y_offset = 0, 0
+            all_x, all_y, all_z = [], [], []
+            current_x_offset, current_y_offset, current_z_offset = 0, 0, 0
             for block_info in st.session_state.track_sequence:
-                x, y = block_info['block'].generate_profile(**block_info['params'])
+                x, y, z = block_info['block'].generate_profile(**block_info['params'])
                 all_x.extend(x + current_x_offset)
                 all_y.extend(y + current_y_offset)
+                all_z.extend(z + current_z_offset)
                 current_x_offset = all_x[-1]
                 current_y_offset = all_y[-1]
+                current_z_offset = all_z[-1]
             
             params['current_height'] = current_y_offset
             
@@ -390,6 +421,10 @@ with st.sidebar:
                 elif btype == 'banked_turn':
                     edited_params['radius'] = st.slider("Turn Radius (m)", 15, 50, int(edited_params.get('radius', 30)), 5, key=f"edit_btr_{idx}")
                     edited_params['angle'] = st.slider("Turn Angle (°)", 30, 180, int(edited_params.get('angle', 90)), 15, key=f"edit_bta_{idx}")
+                elif btype == 'launch':
+                    edited_params['length'] = st.slider("Launch Length (m)", 20, 80, int(edited_params.get('length', 40)), 5, key=f"edit_ll_{idx}")
+                    edited_params['speed_boost'] = st.slider("Speed Boost (m/s)", 10, 40, int(edited_params.get('speed_boost', 20)), 5, key=f"edit_lsb_{idx}")
+                    st.caption(f"Target speed: {edited_params['speed_boost']*3.6:.0f} km/h")
                 elif btype == 'flat_section':
                     edited_params['length'] = st.slider("Section Length (m)", 10, 50, int(edited_params.get('length', 30)), 5, key=f"edit_fsl_{idx}")
                 else:
@@ -438,6 +473,42 @@ with st.sidebar:
 # ============================================================================
 # MAIN AREA: TRACK VISUALIZATION AND RATING
 # ============================================================================
+
+def check_lateral_smoothness(x, z, max_angle_deg=20):
+    """
+    Check for sharp lateral transitions (z-coordinate changes).
+    
+    Args:
+        x, z: Track coordinates (forward and lateral)
+        max_angle_deg: Maximum allowed lateral banking angle change (default 20°)
+    
+    Returns:
+        (is_valid, max_angle, problem_indices)
+    """
+    # If z is essentially flat (max deviation < 0.1m), skip check
+    if np.abs(z).max() < 0.1:
+        return True, 0.0, np.array([])
+    
+    dx = np.diff(x)
+    dz = np.diff(z)
+    
+    # Only check where there's meaningful lateral change (> 1cm)
+    meaningful_dz = np.abs(dz) > 0.01
+    
+    if not meaningful_dz.any():
+        return True, 0.0, np.array([])
+    
+    # Calculate lateral angle from centerline in degrees
+    angles = np.abs(np.arctan2(dz, dx) * 180 / np.pi)
+    
+    # Only check angles where dz is meaningful
+    problem_mask = meaningful_dz & (angles > max_angle_deg)
+    problem_indices = np.where(problem_mask)[0]
+    max_angle = np.max(angles[meaningful_dz]) if meaningful_dz.any() else 0
+    
+    is_valid = len(problem_indices) == 0
+    
+    return is_valid, max_angle, problem_indices
 
 def check_track_smoothness(x, y, max_angle_deg=30, allow_steep_start=True):
     """
@@ -610,16 +681,26 @@ def generate_track_from_blocks():
         return tx, ty
 
     def hermite_blend(P0, P1, T0, T1, steps=24):
+        """Hermite blend supporting 2D or 3D points."""
         t = np.linspace(0.0, 1.0, steps)
         h00 = 2*t**3 - 3*t**2 + 1
         h10 = t**3 - 2*t**2 + t
         h01 = -2*t**3 + 3*t**2
         h11 = t**3 - t**2
-        dx = h00*P0[0] + h10*T0[0] + h01*P1[0] + h11*T1[0]
-        dy = h00*P0[1] + h10*T0[1] + h01*P1[1] + h11*T1[1]
-        return dx, dy
+        
+        # Support 2D or 3D
+        if len(P0) == 2:
+            dx = h00*P0[0] + h10*T0[0] + h01*P1[0] + h11*T1[0]
+            dy = h00*P0[1] + h10*T0[1] + h01*P1[1] + h11*T1[1]
+            return dx, dy
+        else:  # 3D
+            dx = h00*P0[0] + h10*T0[0] + h01*P1[0] + h11*T1[0]
+            dy = h00*P0[1] + h10*T0[1] + h01*P1[1] + h11*T1[1]
+            dz = h00*P0[2] + h10*T0[2] + h01*P1[2] + h11*T1[2]
+            return dx, dy, dz
 
     def blend_joint(prev_x, prev_y, next_x_rel, next_y_rel, steps=24):
+        """2D blend for x,y coordinates (preserves original logic)."""
         # Absolute endpoints
         x0, y0 = prev_x[-1], prev_y[-1]
         x1, y1 = x0 + next_x_rel[0], y0 + next_y_rel[0]
@@ -654,14 +735,52 @@ def generate_track_from_blocks():
             return bx2, by2
         return bx1, by1
 
+    def blend_z_coordinate(prev_z, next_z_rel, blend_length, z_tangent_prev=None, z_tangent_next=None):
+        """Smooth z-coordinate blending using Hermite interpolation.
+        
+        Args:
+            prev_z: Previous z-coordinates array
+            next_z_rel: Next z-coordinates (relative)
+            blend_length: Number of points in blend segment
+            z_tangent_prev: Optional tangent at end of previous segment
+            z_tangent_next: Optional tangent at start of next segment
+        """
+        z0 = prev_z[-1] if len(prev_z) > 0 else 0.0
+        z1 = z0 + next_z_rel[0]
+        
+        # Compute tangents if not provided
+        if z_tangent_prev is None:
+            if len(prev_z) >= 2:
+                z_tangent_prev = prev_z[-1] - prev_z[-2]
+            else:
+                z_tangent_prev = 0.0
+                
+        if z_tangent_next is None:
+            if len(next_z_rel) >= 2:
+                z_tangent_next = next_z_rel[1] - next_z_rel[0]
+            else:
+                z_tangent_next = 0.0
+        
+        # Use 1D Hermite interpolation for z
+        t = np.linspace(0.0, 1.0, blend_length)
+        h00 = 2*t**3 - 3*t**2 + 1
+        h10 = t**3 - 2*t**2 + t
+        h01 = -2*t**3 + 3*t**2
+        h11 = t**3 - t**2
+        
+        z_blend = h00*z0 + h10*z_tangent_prev + h01*z1 + h11*z_tangent_next
+        return z_blend
+
     all_x = []
     all_y = []
+    all_z = []
     current_x_offset = 0.0
     current_y_offset = 0.0
+    current_z_offset = 0.0
     joints_count = 0
 
     for idx, block_info in enumerate(st.session_state.track_sequence):
-        x_rel, y_rel = block_info['block'].generate_profile(**block_info['params'])
+        x_rel, y_rel, z_rel = block_info['block'].generate_profile(**block_info['params'])
 
         if idx == 0:
             # First block: add a short introductory blend from origin to avoid downward elbow
@@ -691,13 +810,19 @@ def generate_track_from_blocks():
             # Append blend (skip origin to avoid duplicate)
             all_x.extend(bx[1:].tolist())
             all_y.extend(by[1:].tolist())
+            # Add z-coordinates for the initial blend (start at 0, end at first block's z[0])
+            z_blend_init = np.linspace(0.0, z_rel[0], len(bx))
+            all_z.extend(z_blend_init[1:].tolist())
             # Append rest of first block relative to last blend point
             x_abs = x_rel + all_x[-1]
             y_abs = y_rel + all_y[-1]
+            z_abs = z_rel + all_z[-1]
             all_x.extend(x_abs.tolist())
             all_y.extend(y_abs.tolist())
+            all_z.extend(z_abs.tolist())
             current_x_offset = all_x[-1]
             current_y_offset = all_y[-1]
+            current_z_offset = all_z[-1]
             joints_count += 1
             continue
 
@@ -707,19 +832,27 @@ def generate_track_from_blocks():
         # Append blend (avoid duplicating endpoint)
         all_x.extend(x_blend[1:].tolist())
         all_y.extend(y_blend[1:].tolist())
+        
+        # For z, use smooth Hermite interpolation instead of linear
+        z_blend = blend_z_coordinate(np.array(all_z), z_rel, blend_length=len(x_blend))
+        all_z.extend(z_blend[1:].tolist())
         joints_count += 1
 
         # Now append the next block offset from last absolute point
         x_abs = x_rel + all_x[-1]
         y_abs = y_rel + all_y[-1]
+        z_abs = z_rel + all_z[-1]
         all_x.extend(x_abs.tolist())
         all_y.extend(y_abs.tolist())
+        all_z.extend(z_abs.tolist())
 
         current_x_offset = all_x[-1]
         current_y_offset = all_y[-1]
+        current_z_offset = all_z[-1]
 
     all_x = np.array(all_x)
     all_y = np.array(all_y)
+    all_z = np.array(all_z)
 
     # Hide blended joints message
     st.session_state.joint_smoothing_applied = None
@@ -732,9 +865,11 @@ def generate_track_from_blocks():
         y_end = float(all_y[-1])
         if abs(y_end - y_target) > 1e-3:
             # Create a gentle leveling segment
-            x0, y0 = all_x[-1], all_y[-1]
+            x0, y0, z0 = all_x[-1], all_y[-1], all_z[-1]
             x1 = x0 + 40.0
             y1 = y_target
+            z1 = 0.0  # Return to center laterally
+            
             # Tangents: continue current direction, land horizontally
             t0x, t0y = endpoint_tangent(all_x, all_y, at_start=False)
             seg_len = max(np.hypot(x1 - x0, y1 - y0), 1e-6)
@@ -745,9 +880,21 @@ def generate_track_from_blocks():
             T0 = sc(t0x, t0y)
             T1 = (scale, 0.0)
             bx, by = hermite_blend((x0, y0), (x1, y1), T0, T1, steps=48)
+            
+            # Smoothly blend z back to center using Hermite interpolation
+            z_tangent_prev = all_z[-1] - all_z[-2] if len(all_z) >= 2 else 0.0
+            z_tangent_next = 0.0  # Land flat laterally
+            t = np.linspace(0.0, 1.0, len(bx))
+            h00 = 2*t**3 - 3*t**2 + 1
+            h10 = t**3 - 2*t**2 + t
+            h01 = -2*t**3 + 3*t**2
+            h11 = t**3 - t**2
+            bz = h00*z0 + h10*z_tangent_prev + h01*z1 + h11*z_tangent_next
+            
             all_x = np.concatenate([all_x, bx[1:]])
             all_y = np.concatenate([all_y, by[1:]])
-    return all_x, all_y
+            all_z = np.concatenate([all_z, bz[1:]])
+    return all_x, all_y, all_z
 
 def simple_gforce_analysis(x, y, initial_speed=15.0, dt=0.1):
     """Simple physics-based g-force calculation"""
@@ -904,7 +1051,7 @@ def compute_airtime_metrics(accel_df, floater_range=( -0.25, 0.25 ), flojector_r
 
 # Auto-generate preview when blocks are added
 if len(st.session_state.track_sequence) > 0:
-    st.session_state.track_x, st.session_state.track_y = generate_track_from_blocks()
+    st.session_state.track_x, st.session_state.track_y, st.session_state.track_z = generate_track_from_blocks()
     st.session_state.track_generated = True
     # If random 3D is enabled, synthesize a gentle lateral profile (z) while keeping 2D plots unfolded
     if st.session_state.get('random_3d'):
@@ -943,7 +1090,7 @@ if st.session_state.track_generated:
         track_df = pd.DataFrame({
             'x': st.session_state.track_x,
             'y': st.session_state.track_y,
-            'z': np.zeros_like(st.session_state.track_x)  # No lateral banking yet
+            'z': st.session_state.get('track_z', np.zeros_like(st.session_state.track_x))
         })
         
         # Get accelerometer data using the existing function, unless precomputed is already present
@@ -962,8 +1109,9 @@ if st.session_state.track_generated:
             st.session_state.airtime_metrics = airtime
             
             # Predict rating automatically
-            predicted_rating = predict_score_bigru(accel_df)
-            st.session_state.predicted_rating = predicted_rating
+            with st.spinner('🤖 AI analyzing your design...'):
+                predicted_rating = predict_score_bigru(track_df)
+                st.session_state.predicted_rating = predicted_rating
             
             # (Moved to sidebar)
 
@@ -994,9 +1142,11 @@ if st.session_state.track_generated:
                 
                 with col_rate:
                     if predicted_rating is not None:
+                        # Add track identifier to verify updates
+                        track_id = hash(tuple(st.session_state.track_x[:10])) % 10000
                         st.markdown(f'<div style="font-size: 2rem; font-weight: bold; text-align: center; color: #FFD700;">⭐ {predicted_rating:.2f}</div>', 
                                    unsafe_allow_html=True)
-                        st.caption("⚠️ Has comfort issues")
+                        st.caption(f"⚠️ Has comfort issues (track #{track_id})")
                     else:
                         st.info("Click 'Rate this track' to compute AI score")
             else:
@@ -1004,6 +1154,9 @@ if st.session_state.track_generated:
                 col_bucket, col_rating = st.columns([1, 1])
                 
                 with col_bucket:
+                    # Add track identifier to verify updates
+                    track_id = hash(tuple(st.session_state.track_x[:10])) % 10000
+                    
                     # Interpretation
                     if predicted_rating >= 4.5:
                         st.success("🔥 **World-Class!**")
@@ -1016,6 +1169,8 @@ if st.session_state.track_generated:
                         st.info("😊 **Solid Design**")
                     else:
                         st.warning("💡 **Needs More Excitement**")
+                    
+                    st.caption(f"Track #{track_id}")
                     # Airtime summary
                     st.markdown("**🎈 Airtime**")
                     st.text(f"Floater: {airtime['floater']:.2f}s; Flojector: {airtime['flojector']:.2f}s; Ejector: {airtime['ejector']:.2f}s")
@@ -1263,6 +1418,7 @@ if st.session_state.track_generated:
         # Calculate stats
         x = st.session_state.track_x
         y = st.session_state.track_y
+        z = st.session_state.get('track_z', np.zeros_like(x))
         
         total_length = np.sum(np.sqrt(np.diff(x)**2 + np.diff(y)**2))
         max_height = np.max(y)
@@ -1272,6 +1428,9 @@ if st.session_state.track_generated:
         # Check track smoothness (allow steep start for lift hill)
         is_smooth, max_angle, _ = check_track_smoothness(x, y, max_angle_deg=30, allow_steep_start=True)
         
+        # Check lateral smoothness (z-coordinate transitions)
+        is_lateral_smooth, max_lateral_angle, lateral_problem_indices = check_lateral_smoothness(x, z, max_angle_deg=20)
+        
         # Get angle after lift section for display
         dx = np.diff(x)
         dy = np.diff(y)
@@ -1279,7 +1438,11 @@ if st.session_state.track_generated:
         lift_section_end = int(len(angles) * 0.2)
         max_angle_after_lift = np.max(angles[lift_section_end:]) if len(angles) > lift_section_end else max_angle
         
-        smoothness_emoji = "✅" if max_angle_after_lift <= 30 else "⚠️"
+        smoothness_emoji = "✅" if (max_angle_after_lift <= 30 and is_lateral_smooth) else "⚠️"
+        
+        # Warn about lateral sharpness if detected
+        if not is_lateral_smooth:
+            st.warning(f"⚠️ Sharp lateral transition detected! Max lateral angle: {max_lateral_angle:.1f}° (should be < 20°). Check banking transitions between blocks.")
         
         # Display metrics
         col_a, col_b = st.columns(2)

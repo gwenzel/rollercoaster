@@ -22,7 +22,8 @@ def lift_hill_profile(length=50, height=40, **kwargs):
 
     x = np.concatenate([x_entry, x_main, x_exit])
     y = np.concatenate([y_entry, y_main, y_exit])
-    return x, y
+    z = np.zeros_like(x)  # No banking on lift hill
+    return x, y, z
 
 
 def vertical_drop_profile(height=40, steepness=0.9, **kwargs):
@@ -32,26 +33,23 @@ def vertical_drop_profile(height=40, steepness=0.9, **kwargs):
     min_horizontal_distance = drop_height * 1.73
     horizontal_distance = min_horizontal_distance / max(steepness, 0.3)
 
-    # Add eased pre-drop and extended runout for smoother connection
-    pre_length = horizontal_distance * 0.15
-    main_length = horizontal_distance * 0.7
-    exit_length = horizontal_distance * 0.15
-
-    x_pre = np.linspace(0, pre_length, 12)
-    pre_progress = x_pre / pre_length
-    y_pre = - (drop_height * 0.15) * (pre_progress ** 3)
-
-    x_main = np.linspace(pre_length, pre_length + main_length, 30)
-    main_progress = (x_main - pre_length) / main_length
-    y_main = y_pre[-1] - (drop_height * 0.7) * main_progress
-
-    x_exit = np.linspace(pre_length + main_length, horizontal_distance, 12)
-    exit_progress = (x_exit - (pre_length + main_length)) / exit_length
-    y_exit = y_main[-1] - (drop_height * 0.15) * exit_progress ** 2
-
-    x = np.concatenate([x_pre, x_main, x_exit])
-    y = np.concatenate([y_pre, y_main, y_exit])
-    return x, y
+    # Single smooth curve from top to bottom - no segments
+    # Use a single cosine-based ease for natural curvature
+    n_points = 60
+    x = np.linspace(0, horizontal_distance, n_points)
+    
+    # Progress from 0 to 1
+    progress = x / horizontal_distance
+    
+    # Smooth ease using raised cosine (starts horizontal, ends horizontal)
+    # This gives natural constant-curvature transition
+    ease = (1 - np.cos(progress * np.pi)) / 2
+    
+    # Apply the drop
+    y = -drop_height * ease
+    
+    z = np.zeros_like(x)  # No banking on vertical drop
+    return x, y, z
 
 
 def loop_profile(diameter=30, **kwargs):
@@ -103,7 +101,8 @@ def loop_profile(diameter=30, **kwargs):
     x = np.concatenate([x_entry, x_loop, x_exit])
     y = np.concatenate([y_entry, y_loop, y_exit])
     y = y - np.linspace(0, y[-1], len(y))
-    return x, y
+    z = np.zeros_like(x)  # No lateral banking in vertical loop
+    return x, y, z
 
 
 def airtime_hill_profile(length=40, height=15, **kwargs):
@@ -127,44 +126,35 @@ def airtime_hill_profile(length=40, height=15, **kwargs):
 
     x = np.concatenate([x_entry, x_main, x_exit])
     y = np.concatenate([y_entry, y_main, y_exit])
-    return x, y
+    z = np.zeros_like(x)  # No banking on airtime hill
+    return x, y, z
 
 
 def spiral_profile(diameter=25, turns=1.5, **kwargs):
     """Horizontal spiral/helix profile that starts and ends at y=0 (relative)."""
-    r0 = diameter / 2
-    total_length = diameter * turns * 0.8
-
-    # Entry: ease-in banking/undulation, starting exactly at y=0
-    entry_length = total_length * 0.2
-    n_entry = 12
-    x_entry = np.linspace(0, entry_length, n_entry)
-    theta_entry = np.linspace(0, 0.3 * np.pi, n_entry)
-    entry_progress = (x_entry / entry_length)
-    # Undulation scaled by progress^2 to start flat at y=0
-    y_entry = (3.0 * np.sin(theta_entry)) * (entry_progress ** 2)
-
-    # Main: gentle undulation around y=0 with slight radius tightening
-    main_length = total_length * 0.6
-    n_main = 40
-    x_main = np.linspace(entry_length, entry_length + main_length, n_main)
-    radius_progress = np.linspace(0, 1, n_main)
-    r_main = r0 * (1 + 0.1 * radius_progress)
-    theta_main = np.linspace(0.3 * np.pi, (turns * 2 - 0.3) * np.pi, n_main)
-    y_main = 3.0 * np.sin(theta_main)
-
-    # Exit: ease-out to y=0
-    exit_length = total_length * 0.2
-    n_exit = 12
-    x_exit = np.linspace(entry_length + main_length, total_length, n_exit)
-    theta_exit = np.linspace((turns * 2 - 0.3) * np.pi, turns * 2 * np.pi, n_exit)
-    exit_progress = (x_exit - (entry_length + main_length)) / exit_length
-    # Undulation scaled by (1 - progress)^2 to finish flat at y=0
-    y_exit = (3.0 * np.sin(theta_exit)) * ((1 - exit_progress) ** 2)
-
-    x = np.concatenate([x_entry, x_main, x_exit])
-    y = np.concatenate([y_entry, y_main, y_exit])
-    return x, y
+    # Gentle spiral with smooth undulation
+    total_length = diameter * turns * np.pi  # More horizontal space for gentler spiral
+    n_points = int(50 * turns)  # Scale points with turns
+    
+    x = np.linspace(0, total_length, n_points)
+    progress = x / total_length
+    
+    # Gentle vertical undulation (helical motion)
+    # Amplitude increases at start, constant in middle, decreases at end
+    amplitude = 4.0  # meters of vertical motion
+    
+    # Smooth envelope to ease in/out
+    envelope = np.sin(progress * np.pi)  # Peaks at middle, zero at ends
+    
+    # Multiple cycles of up/down based on turns
+    y = amplitude * np.sin(progress * turns * 2 * np.pi) * envelope
+    
+    # Add lateral banking for the spiral (realistic corkscrew motion)
+    # Banking angle increases/decreases smoothly
+    bank_amplitude = diameter * 0.3  # Lateral displacement
+    z = bank_amplitude * np.cos(progress * turns * 2 * np.pi) * envelope
+    
+    return x, y, z
 
 
 def banked_turn_profile(radius=30, angle=90, **kwargs):
@@ -195,34 +185,57 @@ def banked_turn_profile(radius=30, angle=90, **kwargs):
          lambda u: (1 - (u-0.8)/0.2)**2]
     )
     y = 0.5 * np.sin(2 * theta) * ease
-    return x, y
+    
+    # Add banking for the turn (tilts inward based on bank angle)
+    # Banking smoothly increases/decreases with the ease curve
+    bank_height = radius * np.sin(np.radians(bank_target))
+    z = -bank_height * ease  # Negative for inward banking
+    
+    return x, y, z
 
 
 def bunny_hop_profile(length=20, height=8, **kwargs):
     max_safe_height = length * 0.3
     actual_height = min(height, max_safe_height)
 
-    entry_length = length * 0.35
-    x_entry = np.linspace(0, entry_length, 12)
-    entry_progress = x_entry / entry_length
-    y_entry = actual_height * (entry_progress ** 3) * 0.5
-
-    main_length = length * 0.3
-    x_main = np.linspace(entry_length, entry_length + main_length, 12)
-    main_progress = (x_main - entry_length) / main_length
-    y_main = actual_height * (0.5 + 0.5 * (1 - (2 * main_progress - 1) ** 2))
-
-    exit_length = length * 0.35
-    x_exit = np.linspace(entry_length + main_length, length, 12)
-    exit_progress = (x_exit - (entry_length + main_length)) / exit_length
-    y_exit = actual_height * (1 - exit_progress) ** 3 * 0.5
-
-    x = np.concatenate([x_entry, x_main, x_exit])
-    y = np.concatenate([y_entry, y_main, y_exit])
-    return x, y
+    # Smooth bump with eased entrance/exit to avoid curvature spikes
+    n_points = 40
+    x = np.linspace(0, length, n_points)
+    progress = x / length
+    
+    # Apply smoothstep to the sine wave amplitude to soften entry/exit
+    # This creates a "smooth sine" that eases in and out
+    ease_in_out = progress ** 2 * (3 - 2 * progress)  # cubic smoothstep
+    
+    # Combine: sine for the bump shape, smoothstep for gentle transitions
+    y = actual_height * np.sin(progress * np.pi) * ease_in_out
+    
+    z = np.zeros_like(x)  # No banking on bunny hop
+    return x, y, z
 
 
 def flat_section_profile(length=30, slope=-0.02, **kwargs):
     x = np.linspace(0, length, 20)
     y = slope * x
-    return x, y
+    z = np.zeros_like(x)  # No banking on flat section
+    return x, y, z
+
+
+def launch_profile(length=40, speed_boost=20.0, **kwargs):
+    """Magnetic launch section (LSM/LIM) that adds speed to the train.
+    
+    Args:
+        length: Length of launch section in meters
+        speed_boost: Target speed increase in m/s (e.g., 20 m/s = 72 km/h)
+        
+    Note: The speed boost is applied in the physics engine by detecting this block type.
+    The track itself is flat with slight incline for realism.
+    """
+    n_points = max(30, int(length / 1.5))  # Denser sampling for launch detection
+    x = np.linspace(0, length, n_points)
+    
+    # Slight downward slope during launch (realistic for many launched coasters)
+    y = -0.5 * (x / length)  # 0.5m drop over the launch
+    
+    z = np.zeros_like(x)  # No banking
+    return x, y, z

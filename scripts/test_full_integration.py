@@ -2,6 +2,15 @@
 Comprehensive test to verify all components work together.
 """
 
+
+#add utils to path
+import sys
+import os
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+
 print("=" * 70)
 print("TESTING BIGRU INTEGRATION FOR STREAMLIT APP")
 print("=" * 70)

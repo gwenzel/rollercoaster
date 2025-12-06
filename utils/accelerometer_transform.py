@@ -14,6 +14,7 @@ The transformation accounts for:
 
 import numpy as np
 import pandas as pd
+from utils.acceleration import compute_acc_profile
 
 
 def compute_track_derivatives(track_df):
@@ -205,6 +206,8 @@ def track_to_accelerometer_data(track_df):
     Convert track coordinates to accelerometer readings for BiGRU model.
     
     This is the main function to use for Streamlit integration.
+    Uses the realistic physics engine (with friction/drag) as default,
+    with fallback to energy conservation if it fails.
     
     Args:
         track_df: DataFrame with columns ['x', 'y'] from build_modular_track()
@@ -214,24 +217,83 @@ def track_to_accelerometer_data(track_df):
         matching the format of real wearable accelerometer data
     """
     try:
-        accel_df = compute_rider_accelerations(track_df)
+        # Prepare 3D points array for acceleration.py (expects Nx3 numpy array)
+        x = track_df['x'].values
+        y = track_df['y'].values
+        z = track_df.get('z', pd.Series(np.zeros_like(x))).values
         
-        # Ensure output is in correct format
-        accel_df = accel_df[['Time', 'Lateral', 'Vertical', 'Longitudinal']]
+        # Stack into Nx3 array with z-up convention (acceleration.py uses z as vertical)
+        # Our coordinates: x=forward, y=vertical, z=lateral
+        # acceleration.py expects: x=forward, y=lateral, z=vertical
+        # So we map: (x, y, z) -> (x, z, y)
+        points = np.column_stack([x, z, y])  # (forward, lateral, vertical)
+        
+        # Initial speed: let energy conservation handle it naturally
+        # Start at near-zero speed (3 m/s ~ walking pace at station)
+        # Energy will build from lift hill height automatically
+        v0 = 3.0  # m/s (station/lift start speed)
+        
+        # Compute acceleration profile using realistic physics
+        # Use very low friction/drag for smooth steel rails
+        acc_result = compute_acc_profile(
+            points,
+            dt=0.02,           # 50Hz sampling
+            mass=6000.0,       # Train mass (kg)
+            rho=1.3,           # Air density (kg/m³)
+            Cd=0.15,           # Drag coefficient (streamlined trains)
+            A=4.0,             # Frontal area (m²)
+            mu=0.003,          # Rolling friction (steel on steel, well-lubricated)
+            v0=v0,             # Initial speed (m/s) - calculated above
+            use_energy_conservation=True  # Use energy-based speeds for reliability
+        )
+        
+        # Extract specific force in g-units (what accelerometer measures)
+        # acceleration.py returns f_long_g, f_lat_g, f_vert_g
+        n = len(x)
+        
+        # Clip extreme values to prevent physics simulation artifacts
+        # Set to ±10g to allow visibility of intense forces while filtering numerical spikes
+        lateral = np.clip(acc_result['f_lat_g'], -10.0, 10.0)
+        vertical = np.clip(acc_result['f_vert_g'], -10.0, 10.0)
+        longitudinal = np.clip(acc_result['f_long_g'], -10.0, 10.0)
+        
+        # Apply moderate Gaussian smoothing to reduce numerical oscillations
+        # Balances smoothness with peak force preservation for realistic coaster feel
+        from scipy.ndimage import gaussian_filter1d
+        sigma_smooth = 2.0  # Moderate smoothing (~100ms window at 50Hz)
+        # Similar to real accelerometer response time
+        lateral = gaussian_filter1d(lateral, sigma=sigma_smooth, mode='nearest')
+        vertical = gaussian_filter1d(vertical, sigma=sigma_smooth, mode='nearest')
+        longitudinal = gaussian_filter1d(longitudinal, sigma=sigma_smooth, mode='nearest')
+        
+        accel_df = pd.DataFrame({
+            'Time': np.linspace(0, n * 0.02, n),
+            'Lateral': lateral,          # Side-to-side
+            'Vertical': vertical,        # Up-down (includes gravity effect)
+            'Longitudinal': longitudinal # Forward-backward
+        })
         
         return accel_df
     
     except Exception as e:
-        print(f"Error in track_to_accelerometer_data: {e}")
+        print(f"Warning: Realistic physics failed ({e}), falling back to energy conservation...")
         
-        # Fallback: return simple approximation
-        n = len(track_df)
-        return pd.DataFrame({
-            'Time': np.linspace(0, n * 0.02, n),
-            'Lateral': np.zeros(n),
-            'Vertical': np.ones(n),  # 1g vertical (gravity)
-            'Longitudinal': np.zeros(n)
-        })
+        # Fallback to the original energy conservation method
+        try:
+            accel_df = compute_rider_accelerations(track_df)
+            accel_df = accel_df[['Time', 'Lateral', 'Vertical', 'Longitudinal']]
+            return accel_df
+        except Exception as e2:
+            print(f"Error in fallback method: {e2}")
+            
+            # Last resort: return simple approximation
+            n = len(track_df)
+            return pd.DataFrame({
+                'Time': np.linspace(0, n * 0.02, n),
+                'Lateral': np.zeros(n),
+                'Vertical': np.ones(n),  # 1g vertical (gravity)
+                'Longitudinal': np.zeros(n)
+            })
 
 
 if __name__ == "__main__":

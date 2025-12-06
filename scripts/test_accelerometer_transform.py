@@ -2,6 +2,15 @@
 Test the accelerometer transformation pipeline.
 """
 
+
+#add utils to path
+import sys
+import os
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+
 from utils.accelerometer_transform import track_to_accelerometer_data
 from utils.track import build_modular_track
 
