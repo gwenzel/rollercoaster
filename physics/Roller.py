@@ -52,7 +52,7 @@ A = 4.0
 mu = 0.02
 
 # files
-track_file = Path('trackpoints.txt')  # file with columns x,y,z (in mm according to the original code)
+track_file = Path('physics/trackpoints.txt')  # file with columns x,y,z (in mm according to the original code)
 #track_file = Path('trackpoints3.txt')  # file with columns x,y,z (in mm according to the original code)
 out_csv = Path('simulacion_rc.csv')
 out_xlsx = Path('simulacion_rc.xlsx')
