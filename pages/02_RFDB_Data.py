@@ -52,9 +52,9 @@ if os.path.exists(mapping_path):
     except Exception as e:
         cc_list = []
         cc_display = []
-        st.warning(f"Could not load Captain Coaster mapping: {e}")
-else:
-    st.info("Captain Coaster mapping CSV not found at ratings_data/rating_to_rfdb_mapping_enhanced.csv")
+        # Silently fail - mapping file is optional
+        pass
+# If mapping file doesn't exist, just continue without it (no message needed)
 
 default_cc = 'Steel Vengeance'
 selected_display = None
