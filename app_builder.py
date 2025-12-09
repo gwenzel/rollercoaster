@@ -1877,7 +1877,8 @@ if st.session_state.track_generated:
             df = st.session_state.accel_df
             vert_g = df['Vertical'].values if 'Vertical' in df.columns else None
             # Scale factor for arrow length per 1g
-            arrow_scale = 2.0
+            # Increased to make 1g clearly visible (10 meters per 1g)
+            arrow_scale = 10.0
             # Downsample frames if very long to keep UI responsive
             max_frames = 900
             if len(xp) > max_frames:
@@ -1889,9 +1890,10 @@ if st.session_state.track_generated:
                 # Use precomputed smooth normals
                 nxi, nyi = nx[i], ny[i]
                 # Acceleration vector along normal using vertical g if available
+                # Flip sign for visualization: positive G (downward force) points down
                 if vert_g is not None and i < len(vert_g):
-                    axv = arrow_scale * vert_g[i] * nxi
-                    ayv = arrow_scale * vert_g[i] * nyi
+                    axv = -arrow_scale * vert_g[i] * nxi  # Negative sign so 1g points down
+                    ayv = -arrow_scale * vert_g[i] * nyi  # Negative sign so 1g points down
                     accel_trace = go.Scatter(x=[xp[i], xp[i] + axv], y=[yp[i], yp[i] + ayv], mode='lines',
                                              line=dict(color='#2ca02c', width=3), name='Acceleration')
                 else:
@@ -1912,9 +1914,10 @@ if st.session_state.track_generated:
             )
             # Add initial acceleration vector to match frame traces if available
             # Initial acceleration vector using smooth normal
+            # Flip sign for visualization: positive G (downward force) points down
             if vert_g is not None and len(vert_g) > 0:
-                axv0 = arrow_scale * vert_g[0] * nx[0]
-                ayv0 = arrow_scale * vert_g[0] * ny[0]
+                axv0 = -arrow_scale * vert_g[0] * nx[0]  # Negative sign so 1g points down
+                ayv0 = -arrow_scale * vert_g[0] * ny[0]  # Negative sign so 1g points down
                 fig_sim.add_trace(go.Scatter(x=[xp[0], xp[0] + axv0], y=[yp[0], yp[0] + ayv0], mode='lines',
                                              line=dict(color='#2ca02c', width=3), name='Acceleration'))
             fig_sim.update_layout(

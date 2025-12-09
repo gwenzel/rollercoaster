@@ -9,6 +9,7 @@ __pycache__/
 *.json
 *.xlsx
 !accel_data/*
+!rfdb_csvs/*
 
 # Images
 *.png
@@ -31,3 +32,4 @@ Thumbs.db
 
 *.mp4
 utils/__pycache__/track.cpython-311.pyc
+utils/__pycache__/visualize.cpython-311.pyc

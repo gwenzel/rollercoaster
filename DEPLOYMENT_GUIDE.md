@@ -136,11 +136,14 @@ server {
 
 - [ ] `requirements.txt` is up to date
 - [ ] All file paths are relative (no absolute paths)
-- [ ] Model files are included or accessible
+- [ ] Model files are included or accessible (`models/*.pth`, `models/*.pkl`)
+- [ ] **RFDB data directory included** (`rfdb_csvs/` folder must be in repository)
+- [ ] **Ratings data included** (`ratings_data/` folder must be in repository)
 - [ ] Environment variables configured (if needed)
 - [ ] Tested locally with `streamlit run app_builder.py`
 - [ ] Removed any hardcoded local paths
 - [ ] Checked for sensitive data (API keys, etc.)
+- [ ] Checked `.gitignore` doesn't exclude data directories
 
 ---
 
@@ -161,6 +164,15 @@ server {
 ### Model Files
 - Ensure model files (`.pth`, `.pkl`) are in the repository
 - Or use cloud storage (S3, GCS) and load at runtime
+
+### RFDB Data Access
+- **Critical**: The `rfdb_csvs/` directory must be included in your repository
+- Check `.gitignore` to ensure `rfdb_csvs/` is NOT ignored
+- The RFDB page uses improved path resolution with fallbacks
+- If data is missing, you'll see helpful error messages
+- For large datasets, consider:
+  - Using Git LFS (Large File Storage)
+  - Or hosting data separately and loading via API/cloud storage
 
 ---
 

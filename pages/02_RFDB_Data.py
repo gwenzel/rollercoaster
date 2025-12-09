@@ -4,19 +4,36 @@ import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from utils.cloud_data_loader import load_rfdb_csv, list_rfdb_parks, list_rfdb_coasters, list_rfdb_csvs
 
 st.set_page_config(page_title="RFDB Data Analysis", page_icon="📊", layout="wide")
 
 st.title("📊 RFDB Data Analysis")
 st.caption("Load real RFDB CSVs and visualize g-forces and egg plots")
 
-rfdb_root = os.path.join(os.path.dirname(__file__), '..', 'rfdb_csvs')
+# Get RFDB root directory - handle both local and deployed environments
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(_script_dir)
+rfdb_root = os.path.join(_project_root, 'rfdb_csvs')
+
+# Fallback: try current working directory if relative path fails
+if not os.path.exists(rfdb_root):
+    rfdb_root = os.path.join(os.getcwd(), 'rfdb_csvs')
+    
+# If still not found, try absolute path from script location
+if not os.path.exists(rfdb_root):
+    rfdb_root = os.path.abspath(os.path.join(_script_dir, '..', 'rfdb_csvs'))
 
 # Captain Coaster list (sorted by rating) with default Steel Vengeance
 cc_list = []
 cc_display = []
 cc_df = None
-mapping_path = os.path.join(os.path.dirname(__file__), '..', 'ratings_data', 'rating_to_rfdb_mapping_enhanced.csv')
+mapping_path = os.path.join(_project_root, 'ratings_data', 'rating_to_rfdb_mapping_enhanced.csv')
+# Fallback for mapping path
+if not os.path.exists(mapping_path):
+    mapping_path = os.path.join(os.getcwd(), 'ratings_data', 'rating_to_rfdb_mapping_enhanced.csv')
+if not os.path.exists(mapping_path):
+    mapping_path = os.path.abspath(os.path.join(_script_dir, '..', 'ratings_data', 'rating_to_rfdb_mapping_enhanced.csv'))
 if os.path.exists(mapping_path):
     try:
         cc_df = pd.read_csv(mapping_path)
@@ -105,178 +122,242 @@ if desired_cc_name and os.path.isdir(rfdb_root):
                 break
     except Exception:
         pass
-try:
-    parks = [d for d in os.listdir(rfdb_root) if os.path.isdir(os.path.join(rfdb_root, d))]
-except Exception:
-    parks = []
+# Try to get parks from cloud storage first, then fallback to local
+parks = list_rfdb_parks(use_cloud=True)
+if not parks:
+    # Fallback to local if cloud fails
+    if os.path.exists(rfdb_root):
+        try:
+            parks = [d for d in os.listdir(rfdb_root) if os.path.isdir(os.path.join(rfdb_root, d))]
+        except Exception:
+            parks = []
+    else:
+        parks = []
+
+if not parks:
+    st.warning("⚠️ No parks found. Check S3 credentials or local rfdb_csvs directory.")
 
 park = st.selectbox("Select Park", options=parks, index=(parks.index(resolved_park) if resolved_park in parks else (0 if parks else None)))
 coasters = []
 if park:
-    park_path = os.path.join(rfdb_root, park)
-    coasters = [d for d in os.listdir(park_path) if os.path.isdir(os.path.join(park_path, d))]
+    coasters = list_rfdb_coasters(park, use_cloud=True)
+    if not coasters:
+        # Fallback to local
+        park_path = os.path.join(rfdb_root, park)
+        if os.path.exists(park_path):
+            try:
+                coasters = [d for d in os.listdir(park_path) if os.path.isdir(os.path.join(park_path, d))]
+            except Exception:
+                coasters = []
 
 coaster = st.selectbox("Select Coaster", options=coasters, index=(coasters.index(resolved_coaster) if resolved_coaster in coasters else (0 if coasters else None)))
 csv_files = []
 if park and coaster:
-    coaster_path = os.path.join(rfdb_root, park, coaster)
-    csv_files = [f for f in os.listdir(coaster_path) if f.endswith('.csv')]
+    csv_files = list_rfdb_csvs(park, coaster, use_cloud=True)
+    if not csv_files:
+        # Fallback to local
+        coaster_path = os.path.join(rfdb_root, park, coaster)
+        if os.path.exists(coaster_path):
+            try:
+                csv_files = [f for f in os.listdir(coaster_path) if f.endswith('.csv')]
+            except Exception:
+                csv_files = []
 
 csv_name = st.selectbox("Select CSV Run", options=csv_files, index=0 if csv_files else None)
 
 if park and coaster and csv_name:
-    full_csv = os.path.join(rfdb_root, park, coaster, csv_name)
-    try:
-        df = pd.read_csv(full_csv)
-        # Column resolution: accommodate RFDB variations
-        cols_lower = {c.lower(): c for c in df.columns}
-        def resolve_any(candidates):
-            for cand in candidates:
-                if cand.lower() in cols_lower:
-                    return cols_lower[cand.lower()]
-            return None
-        # Common time candidates
-        time_col = resolve_any(['Time','time','t','timestamp','elapsed','seconds','s'])
-        # Map RFDB variants: xforce/yforce/zforce, gx/gy/gz, accel_x/y/z, etc.
-        # Convention: z -> Vertical, x -> Lateral, y -> Longitudinal
-        vert_col = resolve_any(['Vertical','vertical','vert','zforce','g_vert','gvertical','gz','accel_z','az'])
-        lat_col = resolve_any(['Lateral','lateral','lat','xforce','g_lat','glateral','gx','accel_x','ax'])
-        long_col = resolve_any(['Longitudinal','longitudinal','long','yforce','g_long','glongitudinal','gy','accel_y','ay'])
-        if not all([vert_col, lat_col, long_col]):
-            st.error("Could not resolve required columns (Vertical, Lateral, Longitudinal) -> please check RFDB CSV headers.")
-        else:
-            accel_df = pd.DataFrame({
-                'Time': df[time_col] if time_col else np.arange(len(df)),
-                'Vertical': df[vert_col],
-                'Lateral': df[lat_col],
-                'Longitudinal': df[long_col],
-            })
-
-            # Captain Coaster rating and rank (global)
-            cc_rating = None
-            cc_rank = None
-            cc_total = None
-            mapping_path = os.path.join(os.path.dirname(__file__), '..', 'ratings_data', 'rating_to_rfdb_mapping_enhanced.csv')
+    # Try to load from cloud first, then fallback to local
+    df = load_rfdb_csv(park, coaster, csv_name, use_cloud=True)
+    if df is None:
+        # Fallback to local
+        full_csv = os.path.join(rfdb_root, park, coaster, csv_name)
+        if os.path.exists(full_csv):
             try:
-                mapping_df = pd.read_csv(mapping_path)
-                if 'coaster_name' in mapping_df.columns and 'average_rating' in mapping_df.columns:
-                    cc_total = len(mapping_df)
-                    # naive match by coaster folder name
-                    name_match = mapping_df[mapping_df['coaster_name'].str.lower() == coaster.lower()]
-                    if not name_match.empty:
-                        cc_rating = float(name_match['average_rating'].iloc[0])
-                    # rank by average_rating (descending)
-                    mapping_df = mapping_df.sort_values('average_rating', ascending=False).reset_index(drop=True)
-                    if cc_rating is not None:
-                        ranks = (mapping_df['average_rating'].rank(method='min', ascending=False)).astype(int)
-                        # find first index with same rating (approx)
-                        idx = (np.abs(mapping_df['average_rating'] - cc_rating)).argmin()
-                        cc_rank = int(ranks.iloc[idx])
-            except Exception:
-                pass
+                df = pd.read_csv(full_csv)
+            except Exception as e:
+                st.error(f"Failed to load CSV: {e}")
+                df = None
+        else:
+            st.error(f"CSV file not found: {csv_name}")
+            df = None
+    
+    if df is not None:
+        try:
+            # Column resolution: accommodate RFDB variations
+            cols_lower = {c.lower(): c for c in df.columns}
+            def resolve_any(candidates):
+                for cand in candidates:
+                    if cand.lower() in cols_lower:
+                        return cols_lower[cand.lower()]
+                return None
+            # Common time candidates
+            time_col = resolve_any(['Time','time','t','timestamp','elapsed','seconds','s'])
+            # Map RFDB variants: xforce/yforce/zforce, gx/gy/gz, accel_x/y/z, etc.
+            # Convention: z -> Vertical, x -> Lateral, y -> Longitudinal
+            vert_col = resolve_any(['Vertical','vertical','vert','zforce','g_vert','gvertical','gz','accel_z','az'])
+            lat_col = resolve_any(['Lateral','lateral','lat','xforce','g_lat','glateral','gx','accel_x','ax'])
+            long_col = resolve_any(['Longitudinal','longitudinal','long','yforce','g_long','glongitudinal','gy','accel_y','ay'])
+            if not all([vert_col, lat_col, long_col]):
+                st.error("Could not resolve required columns (Vertical, Lateral, Longitudinal) -> please check RFDB CSV headers.")
+            else:
+                accel_df = pd.DataFrame({
+                    'Time': df[time_col] if time_col else np.arange(len(df)),
+                    'Vertical': df[vert_col],
+                    'Lateral': df[lat_col],
+                    'Longitudinal': df[long_col],
+                })
 
-            # Summary metrics
-            max_g_vert = float(accel_df['Vertical'].max())
-            min_g_vert = float(accel_df['Vertical'].min())
-            max_g_lat = float(accel_df['Lateral'].abs().max())
-            duration_s = float(accel_df['Time'].iloc[-1] - accel_df['Time'].iloc[0]) if 'Time' in accel_df.columns else float(len(accel_df))
-            # Airtime: proportion of time with vertical g below 0.5g (tunable)
-            airtime_mask = accel_df['Vertical'] < 0.5
-            airtime_ratio = float(airtime_mask.sum()) / float(len(accel_df)) if len(accel_df) else 0.0
-            airtime_seconds = airtime_ratio * duration_s
-
-            # Comparative metrics across runs of the selected coaster
-            comp_airtimes = []
-            comp_max_vert = []
-            comp_max_lat = []
-            coaster_path = os.path.join(rfdb_root, park, coaster)
-            for f in csv_files:
+                # Captain Coaster rating and rank (global)
+                cc_rating = None
+                cc_rank = None
+                cc_total = None
+                # Use the same mapping_path resolution as at the top
+                mapping_path = os.path.join(_project_root, 'ratings_data', 'rating_to_rfdb_mapping_enhanced.csv')
+                if not os.path.exists(mapping_path):
+                    mapping_path = os.path.join(os.getcwd(), 'ratings_data', 'rating_to_rfdb_mapping_enhanced.csv')
+                if not os.path.exists(mapping_path):
+                    mapping_path = os.path.abspath(os.path.join(_script_dir, '..', 'ratings_data', 'rating_to_rfdb_mapping_enhanced.csv'))
                 try:
-                    df_run = pd.read_csv(os.path.join(coaster_path, f))
-                    cols_lower_run = {c.lower(): c for c in df_run.columns}
-                    def res_any_run(cands):
-                        for cand in cands:
-                            if cand.lower() in cols_lower_run:
-                                return cols_lower_run[cand.lower()]
-                        return None
-                    t_col = res_any_run(['Time','time','t','timestamp','elapsed','seconds','s'])
-                    v_col = res_any_run(['Vertical','vertical','vert','zforce','g_vert','gvertical','gz','accel_z','az'])
-                    la_col = res_any_run(['Lateral','lateral','lat','xforce','g_lat','glateral','gx','accel_x','ax'])
-                    lo_col = res_any_run(['Longitudinal','longitudinal','long','yforce','g_long','glongitudinal','gy','accel_y','ay'])
-                    if not all([v_col, la_col, lo_col]):
-                        continue
-                    df_run2 = pd.DataFrame({
-                        'Time': df_run[t_col] if t_col else np.arange(len(df_run)),
-                        'Vertical': df_run[v_col],
-                        'Lateral': df_run[la_col],
-                        'Longitudinal': df_run[lo_col],
-                    })
-                    dur = float(df_run2['Time'].iloc[-1] - df_run2['Time'].iloc[0]) if 'Time' in df_run2.columns else float(len(df_run2))
-                    a_mask = df_run2['Vertical'] < 0.5
-                    a_ratio = float(a_mask.sum()) / float(len(df_run2)) if len(df_run2) else 0.0
-                    comp_airtimes.append(a_ratio * dur)
-                    comp_max_vert.append(float(df_run2['Vertical'].max()))
-                    comp_max_lat.append(float(df_run2['Lateral'].abs().max()))
+                    mapping_df = pd.read_csv(mapping_path)
+                    if 'coaster_name' in mapping_df.columns and 'average_rating' in mapping_df.columns:
+                        cc_total = len(mapping_df)
+                        # naive match by coaster folder name
+                        name_match = mapping_df[mapping_df['coaster_name'].str.lower() == coaster.lower()]
+                        if not name_match.empty:
+                            cc_rating = float(name_match['average_rating'].iloc[0])
+                        # rank by average_rating (descending)
+                        mapping_df = mapping_df.sort_values('average_rating', ascending=False).reset_index(drop=True)
+                        if cc_rating is not None:
+                            ranks = (mapping_df['average_rating'].rank(method='min', ascending=False)).astype(int)
+                            # find first index with same rating (approx)
+                            idx = (np.abs(mapping_df['average_rating'] - cc_rating)).argmin()
+                            cc_rank = int(ranks.iloc[idx])
                 except Exception:
-                    continue
+                    pass
 
-            def percentile_of(value, arr):
-                if not arr:
-                    return None
-                sorted_arr = np.sort(np.array(arr))
-                return float((np.searchsorted(sorted_arr, value, side='right') / len(sorted_arr)) * 100.0)
+                # Summary metrics
+                max_g_vert = float(accel_df['Vertical'].max())
+                min_g_vert = float(accel_df['Vertical'].min())
+                max_g_lat = float(accel_df['Lateral'].abs().max())
+                duration_s = float(accel_df['Time'].iloc[-1] - accel_df['Time'].iloc[0]) if 'Time' in accel_df.columns else float(len(accel_df))
+                # Airtime: proportion of time with vertical g below 0.5g (tunable)
+                airtime_mask = accel_df['Vertical'] < 0.5
+                airtime_ratio = float(airtime_mask.sum()) / float(len(accel_df)) if len(accel_df) else 0.0
+                airtime_seconds = airtime_ratio * duration_s
 
-            airtime_pct = percentile_of(airtime_seconds, comp_airtimes)
-            max_vert_pct = percentile_of(max_g_vert, comp_max_vert)
-            max_lat_pct = percentile_of(max_g_lat, comp_max_lat)
+                # Comparative metrics across runs of the selected coaster
+                comp_airtimes = []
+                comp_max_vert = []
+                comp_max_lat = []
+                # Load all CSV files for comparison (try cloud first, then local)
+                for f in csv_files:
+                    try:
+                        df_run = load_rfdb_csv(park, coaster, f, use_cloud=True)
+                        if df_run is None:
+                            # Fallback to local
+                            coaster_path = os.path.join(rfdb_root, park, coaster)
+                            local_path = os.path.join(coaster_path, f)
+                            if os.path.exists(local_path):
+                                df_run = pd.read_csv(local_path)
+                            else:
+                                continue
+                        cols_lower_run = {c.lower(): c for c in df_run.columns}
+                        def res_any_run(cands):
+                            for cand in cands:
+                                if cand.lower() in cols_lower_run:
+                                    return cols_lower_run[cand.lower()]
+                            return None
+                        t_col = res_any_run(['Time','time','t','timestamp','elapsed','seconds','s'])
+                        v_col = res_any_run(['Vertical','vertical','vert','zforce','g_vert','gvertical','gz','accel_z','az'])
+                        la_col = res_any_run(['Lateral','lateral','lat','xforce','g_lat','glateral','gx','accel_x','ax'])
+                        lo_col = res_any_run(['Longitudinal','longitudinal','long','yforce','g_long','glongitudinal','gy','accel_y','ay'])
+                        if not all([v_col, la_col, lo_col]):
+                            continue
+                        df_run2 = pd.DataFrame({
+                            'Time': df_run[t_col] if t_col else np.arange(len(df_run)),
+                            'Vertical': df_run[v_col],
+                            'Lateral': df_run[la_col],
+                            'Longitudinal': df_run[lo_col],
+                        })
+                        dur = float(df_run2['Time'].iloc[-1] - df_run2['Time'].iloc[0]) if 'Time' in df_run2.columns else float(len(df_run2))
+                        a_mask = df_run2['Vertical'] < 0.5
+                        a_ratio = float(a_mask.sum()) / float(len(df_run2)) if len(df_run2) else 0.0
+                        comp_airtimes.append(a_ratio * dur)
+                        comp_max_vert.append(float(df_run2['Vertical'].max()))
+                        comp_max_lat.append(float(df_run2['Lateral'].abs().max()))
+                    except Exception:
+                        continue
 
-            # Top header with Captain Coaster stars if available
-            header_left, header_right = st.columns([3, 2])
-            with header_left:
-                title_text = f"{coaster} — {park}" if coaster and park else "Selected Run"
-                st.subheader(title_text)
-            with header_right:
-                if cc_rating is not None:
-                    rank_text = f"#{cc_rank} of {cc_total}" if cc_rank is not None and cc_total is not None else ""
-                    st.metric("Captain Coaster Rating", f"{cc_rating:.2f}⭐", rank_text)
+                def percentile_of(value, arr):
+                    """
+                    Calculate percentile rank of a value within an array.
+                    Returns the percentage of values that are less than or equal to the given value.
+                    Uses 'mean' method: average of 'strict' (<) and 'weak' (<=) rankings.
+                    """
+                    if not arr or len(arr) == 0:
+                        return None
+                    arr = np.array(arr)
+                    # Count values less than the given value
+                    count_less = np.sum(arr < value)
+                    # Count values equal to the given value
+                    count_equal = np.sum(arr == value)
+                    # Percentile = (count_less + 0.5 * count_equal) / total * 100
+                    # This gives the mean of 'strict' and 'weak' percentile rankings
+                    total = len(arr)
+                    percentile = (count_less + 0.5 * count_equal) / total * 100.0
+                    return float(percentile)
 
-            st.markdown("**Ride Metrics**")
-            mcol1, mcol2, mcol3, mcol4, mcol5, mcol6 = st.columns(6)
-            vert_color = "🚨" if max_g_vert > 5 else ("⚠️" if max_g_vert > 3 else "✅")
-            neg_color = "🚨" if min_g_vert < -1.5 else ("⚠️" if min_g_vert < -0.5 else "✅")
-            lat_color = "🚨" if max_g_lat > 2.5 else ("⚠️" if max_g_lat > 1.5 else "✅")
-            mcol1.metric("Max Vertical G", f"{max_g_vert:.2f}g {vert_color}")
-            mcol2.metric("Min Vertical G", f"{min_g_vert:.2f}g {neg_color}")
-            mcol3.metric("Max Lateral G", f"{max_g_lat:.2f}g {lat_color}")
-            mcol4.metric("Ride Duration", f"{duration_s:.1f}s")
-            mcol5.metric("Airtime", f"{airtime_seconds:.1f}s ({airtime_ratio*100:.1f}%)")
-            if cc_rating is not None and cc_total is not None:
-                rank_text = f"#{cc_rank} of {cc_total}" if cc_rank is not None else f"of {cc_total}"
-                mcol6.metric("Captain Coaster Rating", f"{cc_rating:.2f}⭐ ({rank_text})")
+                airtime_pct = percentile_of(airtime_seconds, comp_airtimes)
+                max_vert_pct = percentile_of(max_g_vert, comp_max_vert)
+                max_lat_pct = percentile_of(max_g_lat, comp_max_lat)
 
-            # Comparative percentiles row
-            if airtime_pct is not None or max_vert_pct is not None or max_lat_pct is not None:
-                st.caption("Comparative run percentiles (within selected coaster runs)")
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Airtime Percentile", f"{(airtime_pct or 0):.1f}th")
-                c2.metric("Max Vert G Percentile", f"{(max_vert_pct or 0):.1f}th")
-                c3.metric("Max Lat G Percentile", f"{(max_lat_pct or 0):.1f}th")
+                # Top header with Captain Coaster stars if available
+                header_left, header_right = st.columns([3, 2])
+                with header_left:
+                    title_text = f"{coaster} — {park}" if coaster and park else "Selected Run"
+                    st.subheader(title_text)
+                with header_right:
+                    if cc_rating is not None:
+                        rank_text = f"#{cc_rank} of {cc_total}" if cc_rank is not None and cc_total is not None else ""
+                        st.metric("Captain Coaster Rating", f"{cc_rating:.2f}⭐", rank_text)
 
-            st.markdown("**G-Force Time Series**")
-            from utils.visualize import plot_gforce_timeseries, plot_eggplots
-            fig_ts = plot_gforce_timeseries(accel_df)
-            st.plotly_chart(fig_ts, use_container_width=True)
+                st.markdown("**Ride Metrics**")
+                mcol1, mcol2, mcol3, mcol4, mcol5, mcol6 = st.columns(6)
+                vert_color = "🚨" if max_g_vert > 5 else ("⚠️" if max_g_vert > 3 else "✅")
+                neg_color = "🚨" if min_g_vert < -1.5 else ("⚠️" if min_g_vert < -0.5 else "✅")
+                lat_color = "🚨" if max_g_lat > 2.5 else ("⚠️" if max_g_lat > 1.5 else "✅")
+                mcol1.metric("Max Vertical G", f"{max_g_vert:.2f}g {vert_color}")
+                mcol2.metric("Min Vertical G", f"{min_g_vert:.2f}g {neg_color}")
+                mcol3.metric("Max Lateral G", f"{max_g_lat:.2f}g {lat_color}")
+                mcol4.metric("Ride Duration", f"{duration_s:.1f}s")
+                mcol5.metric("Airtime", f"{airtime_seconds:.1f}s ({airtime_ratio*100:.1f}%)")
+                if cc_rating is not None and cc_total is not None:
+                    rank_text = f"#{cc_rank} of {cc_total}" if cc_rank is not None else f"of {cc_total}"
+                    mcol6.metric("Captain Coaster Rating", f"{cc_rating:.2f}⭐ ({rank_text})")
 
-            st.markdown("**Egg Plots (Comfort Envelopes)**")
-            fig_lv, fig_lv2, fig_mag = plot_eggplots(accel_df)
-            col_egg1, col_egg2, col_egg3 = st.columns(3)
-            with col_egg1:
-                st.plotly_chart(fig_lv, use_container_width=True)
-            with col_egg2:
-                st.plotly_chart(fig_lv2, use_container_width=True)
-            with col_egg3:
-                st.plotly_chart(fig_mag, use_container_width=True)
-    except Exception as e:
-        st.error(f"Failed to load RFDB CSV: {e}")
+                # Comparative percentiles row
+                if airtime_pct is not None or max_vert_pct is not None or max_lat_pct is not None:
+                    st.caption("Comparative run percentiles (within selected coaster runs)")
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Airtime Percentile", f"{(airtime_pct or 0):.1f}th")
+                    c2.metric("Max Vert G Percentile", f"{(max_vert_pct or 0):.1f}th")
+                    c3.metric("Max Lat G Percentile", f"{(max_lat_pct or 0):.1f}th")
+
+                st.markdown("**G-Force Time Series**")
+                from utils.visualize import plot_gforce_timeseries, plot_eggplots
+                fig_ts = plot_gforce_timeseries(accel_df)
+                st.plotly_chart(fig_ts, use_container_width=True)
+
+                st.markdown("**Egg Plots (Comfort Envelopes)**")
+                fig_lv, fig_lv2, fig_mag = plot_eggplots(accel_df)
+                col_egg1, col_egg2, col_egg3 = st.columns(3)
+                with col_egg1:
+                    st.plotly_chart(fig_lv, use_container_width=True)
+                with col_egg2:
+                    st.plotly_chart(fig_lv2, use_container_width=True)
+                with col_egg3:
+                    st.plotly_chart(fig_mag, use_container_width=True)
+        except Exception as e:
+            st.error(f"Failed to load RFDB CSV: {e}")
 else:
     st.info("Select a park, coaster, and CSV to view plots.")
