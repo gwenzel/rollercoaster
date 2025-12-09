@@ -26,6 +26,7 @@ from utils.track_blocks import (
     bunny_hop_profile,
     launch_profile,
     flat_section_profile,
+    brake_run_profile,
 )
 
 # Set page layout and main header
@@ -58,36 +59,87 @@ BLOCK_LIBRARY = {
         "bunny_hop": TrackBlock("Bunny Hop", "Quick airtime bump", "🐰", bunny_hop_profile),
         "banked_turn": TrackBlock("Banked Turn", "High-speed turn", "↪️", banked_turn_profile),
         "launch": TrackBlock("Launch Section", "Magnetic acceleration boost (LSM/LIM)", "🚀", launch_profile),
-        "flat_section": TrackBlock("Flat Section", "Brake/station run", "➡️", flat_section_profile),
+        "brake_run": TrackBlock("Brake Run", "Final braking section to stop", "🛑", brake_run_profile),
+        "flat_section": TrackBlock("Flat Section", "Straight section", "➡️", flat_section_profile),
     }
 
 # Always start with a complete starter track on first load
 if 'initialized' not in st.session_state:
     st.session_state.track_sequence = [
         {
+            'type': 'launch',
+            'block': BLOCK_LIBRARY['launch'],
+            'params': {'length': 60, 'speed_boost': 30}  # Longer launch, higher speed for more energy
+        },
+        {
             'type': 'lift_hill',
             'block': BLOCK_LIBRARY['lift_hill'],
-            'params': {'length': 40, 'height': 30}
+            'params': {'length': 120, 'height': 120}  # Much higher lift hill for more potential energy
         },
         {
             'type': 'drop',
             'block': BLOCK_LIBRARY['drop'],
-            'params': {'height': 30, 'steepness': 0.85}
+            'params': {'height': 120, 'steepness': 1.0}  # Higher drop = more speed = higher G-forces
         },
         {
             'type': 'loop',
             'block': BLOCK_LIBRARY['loop'],
-            'params': {'diameter': 25}
-        },
-        {
-            'type': 'airtime_hill',
-            'block': BLOCK_LIBRARY['airtime_hill'],
-            'params': {'length': 35, 'height': 12}
+            'params': {'diameter': 35}  # Larger loop for higher G-forces
         },
         {
             'type': 'flat_section',
             'block': BLOCK_LIBRARY['flat_section'],
-            'params': {'length': 40}
+            'params': {'length': 40}  # Flat section between loop and airtime hill
+        },
+        {
+            'type': 'airtime_hill',
+            'block': BLOCK_LIBRARY['airtime_hill'],
+            'params': {'length': 80, 'height': 25}  # Larger airtime hill
+        },
+        {
+            'type': 'flat_section',
+            'block': BLOCK_LIBRARY['flat_section'],
+            'params': {'length': 60}  # Flat section (replaced second drop)
+        },
+        {
+            'type': 'loop',
+            'block': BLOCK_LIBRARY['loop'],
+            'params': {'diameter': 30}  # Second loop
+        },
+        {
+            'type': 'flat_section',
+            'block': BLOCK_LIBRARY['flat_section'],
+            'params': {'length': 40}  # Flat section between loop and airtime hill
+        },
+        {
+            'type': 'airtime_hill',
+            'block': BLOCK_LIBRARY['airtime_hill'],
+            'params': {'length': 70, 'height': 20}  # Second airtime hill
+        },
+        {
+            'type': 'flat_section',
+            'block': BLOCK_LIBRARY['flat_section'],
+            'params': {'length': 50}  # Transition section
+        },
+        {
+            'type': 'flat_section',
+            'block': BLOCK_LIBRARY['flat_section'],
+            'params': {'length': 50}  # Flat section (replaced third drop)
+        },
+        {
+            'type': 'airtime_hill',
+            'block': BLOCK_LIBRARY['airtime_hill'],
+            'params': {'length': 60, 'height': 18}  # Third airtime hill
+        },
+        {
+            'type': 'flat_section',
+            'block': BLOCK_LIBRARY['flat_section'],
+            'params': {'length': 40}  # Transition
+        },
+        {
+            'type': 'brake_run',
+            'block': BLOCK_LIBRARY['brake_run'],
+            'params': {'length': 50}  # Longer brake run
         }
     ]
     st.session_state.initialized = True
@@ -107,28 +159,36 @@ with st.sidebar:
     col_rand1_top, col_rand2_top = st.columns(2)
     
     with col_rand1_top:
-        if st.button("🎲 Random Template", key="random_top", use_container_width=True, help="Generate a random coaster with 5-10 blocks"):
+        if st.button("🎲 Random Template", key="btn_random_template_quickstart", use_container_width=True, help="Generate a random coaster with 5-10 blocks"):
             import random
             
-            # Random number of blocks (4-8)
-            num_blocks = random.randint(5, 10)
+            # Random number of blocks (targeting ~500m)
+            num_blocks = random.randint(6, 10)
             
-            # Always start with a lift hill followed by a vertical drop and a flat section
+            # Always start with launch, then lift hill followed by a vertical drop and a flat section
             new_sequence = [
+                {
+                    'type': 'launch',
+                    'block': BLOCK_LIBRARY['launch'],
+                    'params': {
+                        'length': random.randint(30, 50),
+                        'speed_boost': random.randint(20, 28)
+                    }
+                },
                 {
                     'type': 'lift_hill',
                     'block': BLOCK_LIBRARY['lift_hill'],
                     'params': {
-                        'length': random.randint(30, 80),
-                        'height': random.randint(20, 50)
+                        'length': random.randint(50, 80),
+                        'height': random.randint(40, 70)
                     }
                 },
                 {
                     'type': 'drop',
                     'block': BLOCK_LIBRARY['drop'],
                     'params': {
-                        'height': random.randint(25, 45),
-                        'steepness': random.uniform(0.7, 0.9)
+                        'height': random.randint(40, 70),
+                        'steepness': random.uniform(0.8, 1.0)
                     }
                 },
                 {
@@ -145,7 +205,7 @@ with st.sidebar:
             # Record the initial drop height to cap later drops to <= 1/3
             first_drop_height = next((b['params']['height'] for b in new_sequence if b['type'] == 'drop'), None)
             
-            for i in range(num_blocks - 3):  # -3 because we added lift + drop + flat
+            for i in range(num_blocks - 4):  # -4 because we added launch + lift + drop + flat
                 block_type = random.choice(available_blocks)
                 # Enforce: at least one flat section in every 3 blocks
                 # Check last two blocks (after the initial lift+drop+flat)
@@ -157,46 +217,50 @@ with st.sidebar:
                 if block_type == 'drop':
                     # Cap height to at most 1/3 of the original first drop
                     if first_drop_height is not None:
-                        max_drop = max(5, int(first_drop_height / 3))
+                        max_drop = max(10, int(first_drop_height / 3))
                         params = {
-                            'height': random.randint(5, max_drop),
-                            'steepness': random.uniform(0.6, 0.85)
+                            'height': random.randint(10, max_drop),
+                            'steepness': random.uniform(0.7, 0.9)
                         }
                     else:
                         params = {
-                            'height': random.randint(20, 50),
-                            'steepness': random.uniform(0.6, 0.85)
+                            'height': random.randint(25, 50),
+                            'steepness': random.uniform(0.7, 0.9)
                         }
                 elif block_type == 'loop':
-                    params = {'diameter': random.randint(20, 40)}
+                    params = {'diameter': random.randint(20, 35)}
                 elif block_type == 'airtime_hill':
                     params = {
-                        'length': random.randint(25, 50),
-                        'height': random.randint(8, 20)
+                        'length': random.randint(30, 60),
+                        'height': random.randint(10, 20)
                     }
                 elif block_type == 'spiral':
                     params = {
-                        'diameter': random.randint(20, 35),
-                        'turns': random.uniform(1.0, 2.5)
+                        'diameter': random.randint(20, 30),
+                        'turns': random.uniform(1.0, 2.0)
                     }
                 elif block_type == 'bunny_hop':
                     params = {
-                        'length': random.randint(15, 25),
+                        'length': random.randint(15, 30),
                         'height': random.randint(5, 12)
                     }
                 elif block_type == 'banked_turn':
                     params = {
-                        'radius': random.randint(20, 40),
+                        'radius': random.randint(20, 35),
                         'angle': random.randint(60, 120)
                     }
                 elif block_type == 'launch':
                     params = {
-                        'length': random.randint(30, 60),
-                        'speed_boost': random.randint(15, 30)
+                        'length': random.randint(30, 50),
+                        'speed_boost': random.randint(20, 28)
                     }
                 elif block_type == 'flat_section':
                     params = {
                         'length': random.randint(20, 40)
+                    }
+                elif block_type == 'brake_run':
+                    params = {
+                        'length': random.randint(25, 40)
                     }
                 
                 new_sequence.append({
@@ -205,10 +269,10 @@ with st.sidebar:
                     'params': params
                 })
             
-            # Always end with a flat section (brake run)
+            # Always end with a brake run
             new_sequence.append({
-                'type': 'flat_section',
-                'block': BLOCK_LIBRARY['flat_section'],
+                'type': 'brake_run',
+                'block': BLOCK_LIBRARY['brake_run'],
                 'params': {'length': random.randint(25, 40)}
             })
             
@@ -221,38 +285,83 @@ with st.sidebar:
             # Enforce end level equals start for random generation
             st.session_state.force_end_level = True
             st.session_state.start_level = 0.0
-            # Enable 3D for random designs
-            st.session_state.random_3d = True
+            # Disable 3D for random designs (2D tracks should have no lateral forces)
+            st.session_state.random_3d = False
             st.success(f"🎲 Generated random coaster with {num_blocks} blocks!")
             st.rerun()
     
     with col_rand2_top:
-        if st.button("🔄 \n Reset to Default", key="reset_top", use_container_width=True, help="Reset to the starter template"):
+        if st.button("🔄 \n Reset to Default", key="btn_reset_default_quickstart", use_container_width=True, help="Reset to the starter template"):
             st.session_state.track_sequence = [
+                {
+                    'type': 'launch',
+                    'block': BLOCK_LIBRARY['launch'],
+                    'params': {'length': 60, 'speed_boost': 30}
+                },
                 {
                     'type': 'lift_hill',
                     'block': BLOCK_LIBRARY['lift_hill'],
-                    'params': {'length': 50, 'height': 35}
+                    'params': {'length': 120, 'height': 120}
                 },
                 {
                     'type': 'drop',
                     'block': BLOCK_LIBRARY['drop'],
-                    'params': {'height': 30, 'steepness': 0.85}
-                },
-                {
-                    'type': 'flat_section',
-                    'block': BLOCK_LIBRARY['flat_section'],
-                    'params': {'length': 30}
+                    'params': {'height': 120, 'steepness': 1.0}
                 },
                 {
                     'type': 'loop',
                     'block': BLOCK_LIBRARY['loop'],
-                    'params': {'diameter': 24}
+                    'params': {'diameter': 35}
                 },
                 {
                     'type': 'flat_section',
                     'block': BLOCK_LIBRARY['flat_section'],
-                    'params': {'length': 25}
+                    'params': {'length': 40}
+                },
+                {
+                    'type': 'airtime_hill',
+                    'block': BLOCK_LIBRARY['airtime_hill'],
+                    'params': {'length': 80, 'height': 25}
+                },
+                {
+                    'type': 'flat_section',
+                    'block': BLOCK_LIBRARY['flat_section'],
+                    'params': {'length': 60}
+                },
+                {
+                    'type': 'loop',
+                    'block': BLOCK_LIBRARY['loop'],
+                    'params': {'diameter': 30}
+                },
+                {
+                    'type': 'flat_section',
+                    'block': BLOCK_LIBRARY['flat_section'],
+                    'params': {'length': 40}
+                },
+                {
+                    'type': 'airtime_hill',
+                    'block': BLOCK_LIBRARY['airtime_hill'],
+                    'params': {'length': 70, 'height': 20}
+                },
+                {
+                    'type': 'flat_section',
+                    'block': BLOCK_LIBRARY['flat_section'],
+                    'params': {'length': 50}
+                },
+                {
+                    'type': 'flat_section',
+                    'block': BLOCK_LIBRARY['flat_section'],
+                    'params': {'length': 50}
+                },
+                {
+                    'type': 'airtime_hill',
+                    'block': BLOCK_LIBRARY['airtime_hill'],
+                    'params': {'length': 60, 'height': 18}
+                },
+                {
+                    'type': 'brake_run',
+                    'block': BLOCK_LIBRARY['brake_run'],
+                    'params': {'length': 50}
                 }
             ]
             st.session_state.track_generated = False
@@ -297,6 +406,113 @@ with st.sidebar:
     </span>
     </div>
     """, unsafe_allow_html=True)
+    
+    # Physics engine selection (hidden, default to Advanced)
+    # st.divider()
+    # st.subheader("⚙️ Physics Engine")
+    # physics_mode = st.radio(
+    #     "G-Force Calculation Method",
+    #     options=["Advanced (Realistic)", "Simple (Geometric)"],
+    #     index=0,
+    #     key="physics_mode_selector",
+    #     help="Both use pure energy conservation from track geometry. Advanced: Full 3D physics with detailed curvature. Simple: Frenet-Serret frame calculation. Use Launch blocks to add initial speed!"
+    # )
+    # Store in session state - default to Advanced
+    if 'physics_mode' not in st.session_state:
+        st.session_state.physics_mode = "Advanced (Realistic)"
+    physics_mode = st.session_state.physics_mode  # Use stored value (default: Advanced)
+    
+    # Physics Parameters Section (hidden by default, accessible via expander)
+    st.divider()
+    with st.expander("⚙️ Physics Parameters", expanded=False):
+        # Initialize physics parameters in session state if not present
+        if 'physics_mass' not in st.session_state:
+            st.session_state.physics_mass = 500.0
+        if 'physics_A' not in st.session_state:
+            st.session_state.physics_A = 2.0
+        if 'physics_Cd' not in st.session_state:
+            st.session_state.physics_Cd = 0.1
+        if 'physics_mu' not in st.session_state:
+            st.session_state.physics_mu = 0.001
+        if 'physics_rho' not in st.session_state:
+            st.session_state.physics_rho = 1.2
+        
+        # Store previous values to detect changes
+        prev_mass = st.session_state.physics_mass
+        prev_A = st.session_state.physics_A
+        prev_Cd = st.session_state.physics_Cd
+        prev_mu = st.session_state.physics_mu
+        prev_rho = st.session_state.physics_rho
+        
+        # Mass (kg)
+        st.session_state.physics_mass = st.number_input(
+            "Mass (kg)",
+            min_value=10.0,
+            max_value=10000.0,
+            value=st.session_state.physics_mass,
+            step=50.0,
+            help="Cart mass. Lower = more acceleration, more sensitive"
+        )
+        
+        # Frontal Area (m²)
+        st.session_state.physics_A = st.number_input(
+            "Frontal Area (m²)",
+            min_value=0.5,
+            max_value=10.0,
+            value=st.session_state.physics_A,
+            step=0.1,
+            help="Cross-sectional area. Smaller = less drag"
+        )
+        
+        # Drag Coefficient
+        st.session_state.physics_Cd = st.number_input(
+            "Drag Coefficient",
+            min_value=0.01,
+            max_value=2.0,
+            value=st.session_state.physics_Cd,
+            step=0.01,
+            help="Aerodynamic drag coefficient. Lower = less air resistance"
+        )
+        
+        # Friction Coefficient
+        st.session_state.physics_mu = st.number_input(
+            "Friction Coefficient",
+            min_value=0.0,
+            max_value=0.1,
+            value=st.session_state.physics_mu,
+            step=0.0001,
+            format="%.4f",
+            help="Rolling friction. Lower = smoother rails, less energy loss"
+        )
+        
+        # Air Density (kg/m³)
+        st.session_state.physics_rho = st.number_input(
+            "Air Density (kg/m³)",
+            min_value=0.5,
+            max_value=2.0,
+            value=st.session_state.physics_rho,
+            step=0.1,
+            help="Air density. Lower = less air resistance"
+        )
+        
+        # Detect if any parameter changed and clear cached data to force recalculation
+        if (prev_mass != st.session_state.physics_mass or
+            prev_A != st.session_state.physics_A or
+            prev_Cd != st.session_state.physics_Cd or
+            prev_mu != st.session_state.physics_mu or
+            prev_rho != st.session_state.physics_rho):
+            # Clear cached acceleration data to force recalculation
+            if 'accel_df' in st.session_state:
+                del st.session_state['accel_df']
+            if 'predicted_rating' in st.session_state:
+                del st.session_state['predicted_rating']
+            if 'airtime_metrics' in st.session_state:
+                del st.session_state['airtime_metrics']
+            st.session_state.track_generated = False
+        
+        st.caption("💡 Adjust these parameters to fine-tune the physics simulation")
+    
+    st.divider()
     
     # Block selection
     selected_block_key = st.selectbox(
@@ -349,11 +565,15 @@ with st.sidebar:
     elif selected_block_key == "launch":
         params['length'] = st.slider("Launch Length (m)", 20, 80, 40, 5)
         params['speed_boost'] = st.slider("Speed Boost (m/s)", 10, 40, 20, 5)
-        st.caption(f"💡 Target speed: {params['speed_boost']*3.6:.0f} km/h")
-        st.info("🚀 Launch adds energy to the system, enabling higher speeds and more intense elements!")
+        st.caption(f"💡 Target speed: {params['speed_boost']:.1f} m/s")
+        st.info("🚀 **TIP:** Start your track with a Launch block! Without initial speed, the train won't have energy to climb. Launch provides the kinetic energy needed for hills and loops.")
         
     elif selected_block_key == "flat_section":
         params['length'] = st.slider("Section Length (m)", 10, 50, 30, 5)
+    
+    elif selected_block_key == "brake_run":
+        params['length'] = st.slider("Brake Length (m)", 20, 50, 30, 5)
+        st.info("🛑 **TIP:** End your track with a Brake Run for a safe, comfortable stop. This provides the final deceleration zone.")
     
     # Add block button
     if st.button("➕ Add to Track", type="primary", use_container_width=True):
@@ -424,9 +644,11 @@ with st.sidebar:
                 elif btype == 'launch':
                     edited_params['length'] = st.slider("Launch Length (m)", 20, 80, int(edited_params.get('length', 40)), 5, key=f"edit_ll_{idx}")
                     edited_params['speed_boost'] = st.slider("Speed Boost (m/s)", 10, 40, int(edited_params.get('speed_boost', 20)), 5, key=f"edit_lsb_{idx}")
-                    st.caption(f"Target speed: {edited_params['speed_boost']*3.6:.0f} km/h")
+                    st.caption(f"Target speed: {edited_params['speed_boost']:.1f} m/s")
                 elif btype == 'flat_section':
                     edited_params['length'] = st.slider("Section Length (m)", 10, 50, int(edited_params.get('length', 30)), 5, key=f"edit_fsl_{idx}")
+                elif btype == 'brake_run':
+                    edited_params['length'] = st.slider("Brake Length (m)", 20, 50, int(edited_params.get('length', 30)), 5, key=f"edit_brl_{idx}")
                 else:
                     # Fallback generic editors
                     for param_name, param_value in edited_params.items():
@@ -896,40 +1118,24 @@ def generate_track_from_blocks():
             all_z = np.concatenate([all_z, bz[1:]])
     return all_x, all_y, all_z
 
-def simple_gforce_analysis(x, y, initial_speed=15.0, dt=0.1):
-    """Simple physics-based g-force calculation"""
-    g = 9.81
+def simple_gforce_analysis(x, y, z=None, dt=0.02):
+    """Simple geometric g-force calculation - direct call to compute_rider_accelerations"""
     
-    # Calculate velocities using energy conservation
-    h_max = np.max(y)
-    v = np.sqrt(initial_speed**2 + 2 * g * (h_max - y))
-    v = np.maximum(v, 0.1)  # Minimum velocity
+    # Just use the working compute_rider_accelerations from accelerometer_transform
+    from utils.accelerometer_transform import compute_rider_accelerations
     
-    # Calculate accelerations
-    dx = np.gradient(x)
-    dy = np.gradient(y)
-    ds = np.sqrt(dx**2 + dy**2)
+    # Create DataFrame
+    track_df = pd.DataFrame({
+        'x': x,
+        'y': y,
+        'z': z if z is not None else np.zeros_like(x)
+    })
     
-    # Tangential acceleration
-    dv = np.gradient(v) / dt
-    a_tangential = dv / np.maximum(ds, 0.001)
+    # Call the working function
+    result_df = compute_rider_accelerations(track_df)
     
-    # Normal acceleration (centripetal)
-    # Radius of curvature
-    ddx = np.gradient(dx)
-    ddy = np.gradient(dy)
-    curvature = np.abs(ddx * dy - dx * ddy) / (ds**3 + 1e-6)
-    a_normal = v**2 * curvature
-    
-    # Vertical component (includes gravity)
-    theta = np.arctan2(dy, dx)
-    a_vertical = (a_normal * np.cos(theta) - g + a_tangential * np.sin(theta)) / g
-    
-    # Lateral (simplified - assumes no banking)
-    a_lateral = a_normal * np.sin(theta) / g
-    
-    # Longitudinal
-    a_longitudinal = a_tangential * np.cos(theta) / g
+    # Return in the expected format
+    return result_df[['Time', 'Lateral', 'Vertical', 'Longitudinal']]
     
     # Create time array
     time = np.arange(len(x)) * dt
@@ -999,6 +1205,43 @@ def check_gforce_safety(accel_df):
         safety_emoji = "✅"
         safety_color = "success"
     
+    # Calculate safety score (0-5 stars)
+    # Start with 5 stars and deduct for safety violations
+    safety_score = 5.0
+    
+    # Deduct for vertical g-forces (positive)
+    if max_vertical > 5.0:
+        safety_score -= 2.0  # Critical violation
+    elif max_vertical > 4.0:
+        safety_score -= 0.8
+    elif max_vertical > 3.0:
+        safety_score -= 0.3
+    
+    # Deduct for negative g-forces (airtime)
+    if min_vertical < -3.0:
+        safety_score -= 2.0  # Critical violation
+    elif min_vertical < -2.0:
+        safety_score -= 0.8
+    elif min_vertical < -1.5:
+        safety_score -= 0.2
+    
+    # Deduct for lateral g-forces
+    if max_lateral > 5.0:
+        safety_score -= 2.0  # Critical violation
+    elif max_lateral > 2.0:
+        safety_score -= 0.5
+    elif max_lateral > 1.5:
+        safety_score -= 0.2
+    
+    # Deduct for longitudinal g-forces
+    if max_longitudinal > 3.0:
+        safety_score -= 0.4
+    elif max_longitudinal > 2.5:
+        safety_score -= 0.2
+    
+    # Clamp to 0-5 range
+    safety_score = max(0.0, min(5.0, safety_score))
+    
     return {
         'level': safety_level,
         'emoji': safety_emoji,
@@ -1008,18 +1251,19 @@ def check_gforce_safety(accel_df):
         'max_vertical': max_vertical,
         'min_vertical': min_vertical,
         'max_lateral': max_lateral,
-        'max_longitudinal': max_longitudinal
+        'max_longitudinal': max_longitudinal,
+        'safety_score': safety_score  # 0-5 stars
     }
 
-def compute_airtime_metrics(accel_df, floater_range=( -0.25, 0.25 ), flojector_range=( -0.75, -0.25 ), ejector_threshold=-0.75 ):
+def compute_airtime_metrics(accel_df):
     """Compute airtime metrics from vertical g data.
     Categories (by vertical g in g-units):
     - Floater Airtime: -0.25g <= Vertical <= 0.25g
-    - Flojector Airtime: -0.75g <= Vertical < -0.25g
-    - Ejector Airtime: Vertical < -0.75g
+    - Flojector Airtime: (-0.75g <= Vertical < -0.25g) OR (0.25g < Vertical <= 0.75g)
+    - Ejector Airtime: Vertical < -0.75g OR Vertical > 0.75g
 
     Returns seconds for each category and total airtime.
-    Thresholds can be tuned; uses time spacing from 'Time' column.
+    Uses time spacing from 'Time' column.
     """
     if accel_df is None or 'Vertical' not in accel_df or 'Time' not in accel_df:
         return {'floater': 0.0, 'flojector': 0.0, 'ejector': 0.0, 'total_airtime': 0.0}
@@ -1031,11 +1275,14 @@ def compute_airtime_metrics(accel_df, floater_range=( -0.25, 0.25 ), flojector_r
     else:
         dt = float(np.median(np.diff(t)))
 
-    flo_min, flo_max = floater_range
-    flj_min, flj_max = flojector_range
-    floater_mask = (g >= flo_min) & (g <= flo_max)
-    flojector_mask = (g >= flj_min) & (g < flj_max)
-    ejector_mask = (g < ejector_threshold)
+    # Floater: between -0.25 and 0.25
+    floater_mask = (g >= -0.25) & (g <= 0.25)
+    
+    # Flojector: between -0.75 and -0.25, OR between 0.25 and 0.75
+    flojector_mask = ((g >= -0.75) & (g < -0.25)) | ((g > 0.25) & (g <= 0.75))
+    
+    # Ejector: higher than 0.75 or lower than -0.75
+    ejector_mask = (g < -0.75) | (g > 0.75)
 
     floater_time = float(floater_mask.sum() * dt)
     flojector_time = float(flojector_mask.sum() * dt)
@@ -1053,6 +1300,17 @@ def compute_airtime_metrics(accel_df, floater_range=( -0.25, 0.25 ), flojector_r
 if len(st.session_state.track_sequence) > 0:
     st.session_state.track_x, st.session_state.track_y, st.session_state.track_z = generate_track_from_blocks()
     st.session_state.track_generated = True
+    
+    # Calculate block boundaries for visualization
+    block_boundaries = [0]
+    cumulative_x = 0
+    for block_info in st.session_state.track_sequence:
+        x_block, y_block, z_block = block_info['block'].generate_profile(**block_info['params'])
+        cumulative_x += x_block[-1]  # Add length of this block
+        block_boundaries.append(cumulative_x)
+    st.session_state.block_boundaries = block_boundaries
+    st.session_state.block_names = [block_info['block'].name for block_info in st.session_state.track_sequence]
+    st.session_state.block_icons = [block_info['block'].icon for block_info in st.session_state.track_sequence]
     # If random 3D is enabled, synthesize a gentle lateral profile (z) while keeping 2D plots unfolded
     if st.session_state.get('random_3d'):
         x = np.array(st.session_state.track_x)
@@ -1093,10 +1351,28 @@ if st.session_state.track_generated:
             'z': st.session_state.get('track_z', np.zeros_like(st.session_state.track_x))
         })
         
-        # Get accelerometer data using the existing function, unless precomputed is already present
-        accel_df = st.session_state.get('accel_df')
-        if accel_df is None or len(accel_df) < 10:
-            accel_df = track_to_accelerometer_data(track_df)
+        # Get accelerometer data based on physics mode
+        physics_mode = st.session_state.get('physics_mode', 'Advanced (Realistic)')
+        
+        if physics_mode == "Simple (Geometric)":
+            # Use simple geometric calculation
+            accel_df = simple_gforce_analysis(
+                st.session_state.track_x,
+                st.session_state.track_y,
+                st.session_state.get('track_z', np.zeros_like(st.session_state.track_x))
+            )
+        else:
+            # Use advanced physics with full 3D acceleration computation
+            accel_df = st.session_state.get('accel_df')
+            if accel_df is None or len(accel_df) < 10:
+                accel_df = track_to_accelerometer_data(
+                    track_df,
+                    mass=st.session_state.get('physics_mass', 500.0),
+                    rho=st.session_state.get('physics_rho', 1.2),
+                    Cd=st.session_state.get('physics_Cd', 0.1),
+                    A=st.session_state.get('physics_A', 2.0),
+                    mu=st.session_state.get('physics_mu', 0.001)
+                )
         
         if accel_df is not None and len(accel_df) > 10:
             # Store for g-force plot
@@ -1113,114 +1389,189 @@ if st.session_state.track_generated:
                 predicted_rating = predict_score_bigru(track_df)
                 st.session_state.predicted_rating = predicted_rating
             
-            # (Moved to sidebar)
-
+            # Compact rating display with scores and airtime in one row
+            safety_score = safety['safety_score']
+            
+            # Determine color based on safety
             if safety['dangers']:
-                # DANGEROUS - Show warning AND rating side by side
-                col_danger, col_rate_danger = st.columns([1, 1])
-                with col_danger:
-                    st.error("🚨 **UNSAFE DESIGN**")
+                safety_color = "#FF0000"
+                safety_emoji = "🚨"
+            elif safety['warnings']:
+                safety_color = "#FFA500"
+                safety_emoji = "⚠️"
+            else:
+                safety_color = "#00C853"
+                safety_emoji = "✅"
+            
+            # Compact rating display - two scores side by side with more space
+            col1, col2 = st.columns([1, 1])
+            
+            with col1:
+                if predicted_rating is not None:
+                    st.markdown(f'<div style="text-align: center;"><span style="font-size: 2.5rem; font-weight: bold; color: #FFD700;">⭐ {predicted_rating:.2f}</span><br><span style="font-size: 0.85rem; color: gray;">Fun Rating</span></div>', unsafe_allow_html=True)
+                    st.progress(min(1.0, max(0.0, predicted_rating / 5.0)))
+            
+            with col2:
+                st.markdown(f'<div style="text-align: center;"><span style="font-size: 2.5rem; font-weight: bold; color: {safety_color};">{safety_emoji} {safety_score:.1f}</span><br><span style="font-size: 0.85rem; color: gray;">Safety Score</span></div>', unsafe_allow_html=True)
+                st.progress(min(1.0, max(0.0, safety_score / 5.0)))
+            
+            # Compact warnings/dangers
+            if safety['dangers']:
+                with st.expander("🚨 Safety Issues (DANGEROUS)", expanded=False):
                     for danger in safety['dangers']:
                         st.caption(danger)
-                    st.caption("⚠️ Fix safety issues")
-                
-                with col_rate_danger:
-                    if predicted_rating is not None:
-                        st.markdown(f'<div style="font-size: 2rem; font-weight: bold; text-align: center; color: #FFD700;">⭐ {predicted_rating:.2f}</div>', 
-                                   unsafe_allow_html=True)
-                        st.caption("Rating (if rideable)")
-                    else:
-                        st.info("Click 'Rate this track' to compute AI score")
-                
             elif safety['warnings']:
-                # Has warnings - compact format with rating
-                col_warn, col_rate = st.columns([1, 1])
-                with col_warn:
-                    st.warning("**⚠️ SAFETY CONCERNS**")
+                with st.expander("⚠️ Safety Warnings", expanded=False):
                     for warning in safety['warnings']:
                         st.caption(warning)
-                
-                with col_rate:
-                    if predicted_rating is not None:
-                        # Add track identifier to verify updates
-                        track_id = hash(tuple(st.session_state.track_x[:10])) % 10000
-                        st.markdown(f'<div style="font-size: 2rem; font-weight: bold; text-align: center; color: #FFD700;">⭐ {predicted_rating:.2f}</div>', 
-                                   unsafe_allow_html=True)
-                        st.caption(f"⚠️ Has comfort issues (track #{track_id})")
-                    else:
-                        st.info("Click 'Rate this track' to compute AI score")
-            else:
-                # SAFE - Compact two-column layout
-                col_bucket, col_rating = st.columns([1, 1])
-                
-                with col_bucket:
-                    # Add track identifier to verify updates
-                    track_id = hash(tuple(st.session_state.track_x[:10])) % 10000
+            
+            # Feature importance explanation (after all safety cases, for ALL tracks)
+            if predicted_rating is not None:
+                with st.expander("🧠 Why this rating? (AI Explanation)", expanded=False):
+                    st.caption("**What the AI considers:**")
                     
-                    # Interpretation
-                    if predicted_rating >= 4.5:
-                        st.success("🔥 **World-Class!**")
-                        st.balloons()
-                    elif predicted_rating >= 4.0:
-                        st.success("🎉 **Excellent!**")
-                    elif predicted_rating >= 3.5:
-                        st.info("👍 **Great Ride!**")
-                    elif predicted_rating >= 3.0:
-                        st.info("😊 **Solid Design**")
-                    else:
-                        st.warning("💡 **Needs More Excitement**")
+                    # Calculate feature contributions based on actual track stats
+                    total_airtime = airtime['total_airtime']
+                    ejector_time = airtime['ejector']
                     
-                    st.caption(f"Track #{track_id}")
-                    # Airtime summary
-                    st.markdown("**🎈 Airtime**")
-                    st.text(f"Floater: {airtime['floater']:.2f}s; Flojector: {airtime['flojector']:.2f}s; Ejector: {airtime['ejector']:.2f}s")
-                    st.caption(f"Total airtime: {airtime['total_airtime']:.2f}s")
+                    # G-force variety (from accel_df)
+                    vertical_range = accel_df['Vertical'].max() - accel_df['Vertical'].min()
+                    
+                    # Simple heuristic scoring for display
+                    airtime_score = min(100, (total_airtime / 10.0) * 100)  # ~10s is excellent
+                    variety_score = min(100, (vertical_range / 6.0) * 100)  # 6g range is excellent
+                    intensity_score = min(100, (ejector_time / 3.0) * 100)  # 3s ejector is great
+                    
+                    # Display as progress bars
+                    col_exp1, col_exp2 = st.columns(2)
+                    with col_exp1:
+                        st.metric("Airtime Impact", f"{airtime_score:.0f}%", 
+                                 help=f"{total_airtime:.1f}s total airtime")
+                        st.progress(min(1.0, max(0.0, airtime_score / 100)))
+                        
+                        st.metric("G-Force Variety", f"{variety_score:.0f}%",
+                                 help=f"{vertical_range:.1f}g vertical range")
+                        st.progress(min(1.0, max(0.0, variety_score / 100)))
+                    
+                    with col_exp2:
+                        st.metric("Intensity/Thrills", f"{intensity_score:.0f}%",
+                                 help=f"{ejector_time:.1f}s ejector airtime")
+                        st.progress(min(1.0, max(0.0, intensity_score / 100)))
+                        
+                        # Smoothness (inverse of max g-forces)
+                        max_vertical = abs(accel_df['Vertical']).max()
+                        smoothness_score = max(0, 100 - (max_vertical - 4) * 20)  # Penalty above 4g
+                        st.metric("Comfort/Smoothness", f"{smoothness_score:.0f}%",
+                                 help=f"Max {max_vertical:.1f}g vertical")
+                        st.progress(min(1.0, max(0.0, smoothness_score / 100)))
+                    
+                    st.caption("⚠️ This is a simplified explanation. The actual AI model uses complex sequential patterns in acceleration data.")
+            
+            # Safety score explanation
+            with st.expander("🛡️ Safety Score Breakdown", expanded=False):
+                max_vertical = safety['max_vertical']
+                min_vertical = safety['min_vertical']
+                max_lateral = safety['max_lateral']
+                max_longitudinal = safety['max_longitudinal']
                 
-                with col_rating:
-                    # Numerical rating with smaller display
-                    if predicted_rating is not None:
-                        st.markdown(f'<div style="font-size: 2.5rem; font-weight: bold; text-align: center; color: #FFD700; margin-top: 0;">⭐ {predicted_rating:.2f}</div>', 
-                                   unsafe_allow_html=True)
-                        st.progress(predicted_rating / 5.0)
-                    else:
-                        st.info("Click 'Rate this track' to compute AI score")
+                # Calculate deductions
+                vertical_pos_deduction = 0
+                if max_vertical > 5.0:
+                    vertical_pos_deduction = 2.0
+                elif max_vertical > 4.0:
+                    vertical_pos_deduction = 0.8
+                elif max_vertical > 3.0:
+                    vertical_pos_deduction = 0.3
+                
+                vertical_neg_deduction = 0
+                if min_vertical < -3.0:
+                    vertical_neg_deduction = 2.0
+                elif min_vertical < -2.0:
+                    vertical_neg_deduction = 0.8
+                elif min_vertical < -1.5:
+                    vertical_neg_deduction = 0.2
+                
+                lateral_deduction = 0
+                if max_lateral > 5.0:
+                    lateral_deduction = 2.0
+                elif max_lateral > 2.0:
+                    lateral_deduction = 0.5
+                elif max_lateral > 1.5:
+                    lateral_deduction = 0.2
+                
+                longitudinal_deduction = 0
+                if max_longitudinal > 3.0:
+                    longitudinal_deduction = 0.4
+                elif max_longitudinal > 2.5:
+                    longitudinal_deduction = 0.2
+                
+                total_deduction = vertical_pos_deduction + vertical_neg_deduction + lateral_deduction + longitudinal_deduction
+                
+                # Compact 4-column layout
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    ded_text = f"-{vertical_pos_deduction:.1f}★" if vertical_pos_deduction > 0 else "✓"
+                    st.markdown(f'<div style="font-size: 0.85rem;"><span style="color: #00C853;">↑ {max_vertical:.2f}g</span><br><small>{ded_text}</small></div>', unsafe_allow_html=True)
+                
+                with col2:
+                    ded_text = f"-{vertical_neg_deduction:.1f}★" if vertical_neg_deduction > 0 else "✓"
+                    st.markdown(f'<div style="font-size: 0.85rem;"><span style="color: #FF0000;">↓ {min_vertical:.2f}g</span><br><small>{ded_text}</small></div>', unsafe_allow_html=True)
+                
+                with col3:
+                    ded_text = f"-{lateral_deduction:.1f}★" if lateral_deduction > 0 else "✓"
+                    st.markdown(f'<div style="font-size: 0.85rem;">↔ {max_lateral:.2f}g<br><small>{ded_text}</small></div>', unsafe_allow_html=True)
+                
+                with col4:
+                    ded_text = f"-{longitudinal_deduction:.1f}★" if longitudinal_deduction > 0 else "✓"
+                    st.markdown(f'<div style="font-size: 0.85rem;">↕ {max_longitudinal:.2f}g<br><small>{ded_text}</small></div>', unsafe_allow_html=True)
+                
+                # Compact summary
+                final_score = max(0.0, 5.0 - total_deduction)
+                st.markdown(f'<div style="margin-top: 0.5rem; font-size: 0.9rem;"><strong>5.0 - {total_deduction:.1f} = {final_score:.1f}★</strong></div>', unsafe_allow_html=True)
+                
+                if final_score >= 4.5:
+                    st.caption("✅ Excellent safety")
+                elif final_score >= 3.5:
+                    st.caption("⚠️ Acceptable")
+                elif final_score >= 2.0:
+                    st.caption("⚠️ High g-forces")
+                else:
+                    st.caption("🚨 Dangerous")
             
             # 3D view moved to bottom section
 
         else:
             st.error("Track too short for AI analysis")
             # Fallback to simple g-force analysis
-            initial_speed = st.session_state.get('initial_speed', 15.0)
             st.session_state.accel_df = simple_gforce_analysis(
                 st.session_state.track_x, 
-                st.session_state.track_y, 
-                initial_speed=initial_speed
+                st.session_state.track_y,
+                st.session_state.get('track_z', np.zeros_like(st.session_state.track_x))
             )
             
     except Exception as e:
         st.error(f"AI Error: {str(e)}")
         st.caption("Using simple physics model instead...")
         # Fallback to simple g-force analysis
-        initial_speed = st.session_state.get('initial_speed', 15.0)
         st.session_state.accel_df = simple_gforce_analysis(
             st.session_state.track_x, 
-            st.session_state.track_y, 
-            initial_speed=initial_speed
+            st.session_state.track_y,
+            st.session_state.get('track_z', np.zeros_like(st.session_state.track_x))
         )
     
     # Ensure we always have g-force data for the plots
     if not hasattr(st.session_state, 'accel_df'):
-        initial_speed = st.session_state.get('initial_speed', 15.0)
         st.session_state.accel_df = simple_gforce_analysis(
             st.session_state.track_x, 
-            st.session_state.track_y, 
-            initial_speed=initial_speed
+            st.session_state.track_y,
+            st.session_state.get('track_z', np.zeros_like(st.session_state.track_x))
         )
     
     st.divider()
     
-    # Row 1: Track profile and Statistics
-    col1, col2 = st.columns(2)
+    # Row 1: Track profile and Statistics (2:1 ratio)
+    col1, col2 = st.columns([2, 1])
     
     with col1:
         st.markdown("**Track Profile (Side View)**")
@@ -1243,6 +1594,40 @@ if st.session_state.track_generated:
             line=dict(color="green", width=2, dash="dash")
         )
         
+        # Add block boundaries as vertical lines
+        if hasattr(st.session_state, 'block_boundaries') and hasattr(st.session_state, 'block_icons'):
+            y_max = max(st.session_state.track_y)
+            y_min = min(st.session_state.track_y)
+            for i, boundary in enumerate(st.session_state.block_boundaries[1:-1], start=1):  # Skip first and last
+                fig_profile.add_shape(
+                    type="line",
+                    x0=boundary, x1=boundary,
+                    y0=y_min, y1=y_max,
+                    line=dict(color="rgba(128, 128, 128, 0.3)", width=1, dash="dot")
+                )
+                # Add block icon annotation at the midpoint
+                if i < len(st.session_state.block_icons):
+                    midpoint_x = (st.session_state.block_boundaries[i-1] + st.session_state.block_boundaries[i]) / 2
+                    fig_profile.add_annotation(
+                        x=midpoint_x,
+                        y=y_max * 1.08,  # Slightly above the track
+                        text=st.session_state.block_icons[i-1],
+                        showarrow=False,
+                        font=dict(size=14),
+                        xanchor="center"
+                    )
+            # Add last block icon
+            if len(st.session_state.block_icons) > 0:
+                midpoint_x = (st.session_state.block_boundaries[-2] + st.session_state.block_boundaries[-1]) / 2
+                fig_profile.add_annotation(
+                    x=midpoint_x,
+                    y=y_max * 1.08,
+                    text=st.session_state.block_icons[-1],
+                    showarrow=False,
+                    font=dict(size=14),
+                    xanchor="center"
+                )
+        
         fig_profile.update_layout(
             xaxis_title="Distance (m)",
             yaxis_title="Height (m)",
@@ -1257,40 +1642,53 @@ if st.session_state.track_generated:
             accel_df_tl = st.session_state.accel_df.copy()
             t = accel_df_tl['Time'].values
             g = accel_df_tl['Vertical'].values
-            flo_min, flo_max = -0.25, 0.25
-            flj_min, flj_max = -0.75, -0.25
-            flo_mask = (g >= flo_min) & (g <= flo_max)
-            flj_mask = (g >= flj_min) & (g < flj_max)
-            ej_mask = (g < -0.75)
+            
+            # Convert time to distance along track to match the profile plot above
+            # Use track x-coordinates which represent distance along the track
+            x_track = st.session_state.track_x
+            # Interpolate to match acceleration dataframe length
+            if len(x_track) != len(t):
+                distance = np.linspace(0, x_track[-1], len(t))
+            else:
+                distance = x_track
+            
+            # Floater: between -0.25 and 0.25
+            flo_mask = (g >= -0.25) & (g <= 0.25)
+            
+            # Flojector: between -0.75 and -0.25, OR between 0.25 and 0.75
+            flj_mask = ((g >= -0.75) & (g < -0.25)) | ((g > 0.25) & (g <= 0.75))
+            
+            # Ejector: higher than 0.75 or lower than -0.75
+            ej_mask = (g < -0.75) | (g > 0.75)
 
-            def mask_to_intervals(mask, time_array):
+            def mask_to_intervals(mask, position_array):
                 intervals = []
-                if len(time_array) == 0:
+                if len(position_array) == 0:
                     return intervals
                 prev = False
                 start = None
                 for i, m in enumerate(mask):
                     if m and not prev:
-                        start = time_array[i]
+                        start = position_array[i]
                     if prev and not m:
-                        end = time_array[i]
+                        end = position_array[i]
                         intervals.append((start, end))
                         start = None
                     prev = m
                 if prev and start is not None:
-                    intervals.append((start, time_array[-1]))
+                    intervals.append((start, position_array[-1]))
                 return intervals
 
-            flo_int = mask_to_intervals(flo_mask, t)
-            flj_int = mask_to_intervals(flj_mask, t)
-            ej_int = mask_to_intervals(ej_mask, t)
+            flo_int = mask_to_intervals(flo_mask, distance)
+            flj_int = mask_to_intervals(flj_mask, distance)
+            ej_int = mask_to_intervals(ej_mask, distance)
 
             import plotly.graph_objects as go
             fig_tl = go.Figure()
-            if len(t):
-                fig_tl.add_trace(go.Scatter(x=[t[0], t[-1]], y=[3,3], mode='lines', line=dict(color='#e0e0e0', width=1), showlegend=False))
-                fig_tl.add_trace(go.Scatter(x=[t[0], t[-1]], y=[2,2], mode='lines', line=dict(color='#e0e0e0', width=1), showlegend=False))
-                fig_tl.add_trace(go.Scatter(x=[t[0], t[-1]], y=[1,1], mode='lines', line=dict(color='#e0e0e0', width=1), showlegend=False))
+            if len(distance):
+                fig_tl.add_trace(go.Scatter(x=[distance[0], distance[-1]], y=[3,3], mode='lines', line=dict(color='#e0e0e0', width=1), showlegend=False))
+                fig_tl.add_trace(go.Scatter(x=[distance[0], distance[-1]], y=[2,2], mode='lines', line=dict(color='#e0e0e0', width=1), showlegend=False))
+                fig_tl.add_trace(go.Scatter(x=[distance[0], distance[-1]], y=[1,1], mode='lines', line=dict(color='#e0e0e0', width=1), showlegend=False))
 
             def add_band(intervals, y_top, y_bottom, color, name):
                 for (a, b) in intervals:
@@ -1300,117 +1698,24 @@ if st.session_state.track_generated:
             add_band(ej_int, 3.2, 2.8, '#F44336', 'Ejector')
             add_band(flj_int, 2.2, 1.8, '#FF9800', 'Flojector')
             add_band(flo_int, 1.2, 0.8, '#4CAF50', 'Floater')
+            
+            # Add block boundaries as vertical lines
+            if hasattr(st.session_state, 'block_boundaries'):
+                for boundary in st.session_state.block_boundaries[1:-1]:  # Skip first and last
+                    fig_tl.add_shape(
+                        type="line",
+                        x0=boundary, x1=boundary,
+                        y0=0.5, y1=3.5,
+                        line=dict(color="rgba(128, 128, 128, 0.3)", width=1, dash="dot")
+                    )
 
             fig_tl.update_layout(
                 height=180,
                 margin=dict(l=10, r=10, t=5, b=10),
                 yaxis=dict(showticklabels=True, tickmode='array', tickvals=[1,2,3], ticktext=['Floater','Flojector','Ejector'], range=[0.5,3.5]),
-                xaxis_title='Time (s)'
+                xaxis_title='Distance (m)'
             )
             st.plotly_chart(fig_tl, use_container_width=True)
-
-            # Particle Simulation along the track (on-demand)
-            st.markdown("**🎬 Particle Simulation (Track Traversal)**")
-            run_sim = st.button("Run Particle Simulation")
-            if run_sim and 'accel_df' in st.session_state and 'track_x' in st.session_state and 'track_y' in st.session_state:
-                sim_time = st.session_state.accel_df['Time'].values
-                x = np.array(st.session_state.track_x)
-                y = np.array(st.session_state.track_y)
-                n = len(x)
-                # Build fractional indices across the track to avoid stalls between points
-                if len(sim_time) <= 1 or n <= 1:
-                    st.info("Not enough points to simulate.")
-                else:
-                    idx_float = np.linspace(0, n - 1, len(sim_time))
-                    i0 = np.floor(idx_float).astype(int)
-                    i1 = np.minimum(i0 + 1, n - 1)
-                    alpha = idx_float - i0
-                    xp = x[i0] * (1 - alpha) + x[i1] * alpha
-                    yp = y[i0] * (1 - alpha) + y[i1] * alpha
-                    # Compute smooth tangents from interpolated points using central differences
-                    tx = np.zeros_like(xp)
-                    ty = np.zeros_like(yp)
-                    for k in range(len(xp)):
-                        if k == 0:
-                            dxk = xp[1] - xp[0]
-                            dyk = yp[1] - yp[0]
-                        elif k == len(xp) - 1:
-                            dxk = xp[-1] - xp[-2]
-                            dyk = yp[-1] - yp[-2]
-                        else:
-                            dxk = xp[k + 1] - xp[k - 1]
-                            dyk = yp[k + 1] - yp[k - 1]
-                        normk = np.hypot(dxk, dyk)
-                        if normk == 0:
-                            tx[k], ty[k] = 1.0, 0.0
-                        else:
-                            tx[k], ty[k] = dxk / normk, dyk / normk
-                    # Normals from tangents
-                    nx = -ty
-                    ny = tx
-                    # Enforce normal continuity to avoid flips at segment boundaries
-                    for k in range(1, len(nx)):
-                        if nx[k - 1] * nx[k] + ny[k - 1] * ny[k] < 0:
-                            nx[k] = -nx[k]
-                            ny[k] = -ny[k]
-
-                    import plotly.graph_objects as go
-                    # Use the same vertical g column as other plots: 'Vertical'
-                    df = st.session_state.accel_df
-                    vert_g = df['Vertical'].values if 'Vertical' in df.columns else None
-                    # Scale factor for arrow length per 1g
-                    arrow_scale = 2.0
-                    # Downsample frames if very long to keep UI responsive
-                    max_frames = 900
-                    if len(xp) > max_frames:
-                        step = int(np.ceil(len(xp) / max_frames))
-                    else:
-                        step = 1
-                    frames = []
-                    for i in range(0, len(xp), step):
-                        # Use precomputed smooth normals
-                        nxi, nyi = nx[i], ny[i]
-                        # Acceleration vector along normal using vertical g if available
-                        if vert_g is not None and i < len(vert_g):
-                            axv = arrow_scale * vert_g[i] * nxi
-                            ayv = arrow_scale * vert_g[i] * nyi
-                            accel_trace = go.Scatter(x=[xp[i], xp[i] + axv], y=[yp[i], yp[i] + ayv], mode='lines',
-                                                     line=dict(color='#2ca02c', width=3), name='Acceleration')
-                        else:
-                            accel_trace = go.Scatter(x=[xp[i], xp[i]], y=[yp[i], yp[i]], mode='lines',
-                                                     line=dict(color='#2ca02c', width=3), name='Acceleration')
-                        frames.append(go.Frame(data=[
-                            go.Scatter(x=x, y=y, mode='lines', line=dict(color='rgb(255,75,75)', width=3), name='Track'),
-                            go.Scatter(x=[xp[i]], y=[yp[i]], mode='markers', marker=dict(size=12, color='#1f77b4'), name='Particle'),
-                            accel_trace
-                        ], name=str(i)))
-
-                    fig_sim = go.Figure(
-                        data=[
-                            go.Scatter(x=x, y=y, mode='lines', line=dict(color='rgb(255,75,75)', width=3), name='Track'),
-                            go.Scatter(x=[xp[0]], y=[yp[0]], mode='markers', marker=dict(size=12, color='#1f77b4'), name='Particle')
-                        ],
-                        frames=frames
-                    )
-                    # Add initial acceleration vector to match frame traces if available
-                    # Initial acceleration vector using smooth normal
-                    if vert_g is not None and len(vert_g) > 0:
-                        axv0 = arrow_scale * vert_g[0] * nx[0]
-                        ayv0 = arrow_scale * vert_g[0] * ny[0]
-                        fig_sim.add_trace(go.Scatter(x=[xp[0], xp[0] + axv0], y=[yp[0], yp[0] + ayv0], mode='lines',
-                                                     line=dict(color='#2ca02c', width=3), name='Acceleration'))
-                    fig_sim.update_layout(
-                        xaxis_title='Distance (m)', yaxis_title='Height (m)',
-                        height=300, margin=dict(l=20, r=20, t=30, b=20),
-                        updatemenus=[{
-                            'type': 'buttons',
-                            'buttons': [
-                                {'label': 'Play', 'method': 'animate', 'args': [None, {'fromcurrent': True, 'frame': {'duration': 30, 'redraw': True}, 'transition': {'duration': 0}}]},
-                                {'label': 'Pause', 'method': 'animate', 'args': [[None], {'mode': 'immediate', 'transition': {'duration': 0}, 'frame': {'duration': 0, 'redraw': False}}]}
-                            ]
-                        }]
-                    )
-                    st.plotly_chart(fig_sim, use_container_width=True)
     
     with col2:
         st.markdown("**Track Statistics**")
@@ -1429,7 +1734,11 @@ if st.session_state.track_generated:
         is_smooth, max_angle, _ = check_track_smoothness(x, y, max_angle_deg=30, allow_steep_start=True)
         
         # Check lateral smoothness (z-coordinate transitions)
-        is_lateral_smooth, max_lateral_angle, lateral_problem_indices = check_lateral_smoothness(x, z, max_angle_deg=20)
+        try:
+            is_lateral_smooth, max_lateral_angle, lateral_problem_indices = check_lateral_smoothness(x, z, max_angle_deg=20)
+        except Exception as e:
+            st.error(f"Lateral smoothness check error: {str(e)}")
+            is_lateral_smooth, max_lateral_angle, lateral_problem_indices = True, 0.0, np.array([])
         
         # Get angle after lift section for display
         dx = np.diff(x)
@@ -1458,25 +1767,25 @@ if st.session_state.track_generated:
             col_floater, col_flojector, col_ejector, col_total = st.columns([1, 1, 1, 1])
             with col_floater:
                 st.markdown(
-                    f"<div style='font-size: 1.8rem; font-weight: bold; text-align: center;'>⛅ {airtime['floater']:.2f}s</div>",
+                    f"<div style='font-size: 1.4rem; font-weight: bold; text-align: center;'>⛅ {airtime['floater']:.2f}s</div>",
                     unsafe_allow_html=True
                 )
                 st.caption("Floater")
             with col_flojector:
                 st.markdown(
-                    f"<div style='font-size: 1.8rem; font-weight: bold; text-align: center;'>💨 {airtime['flojector']:.2f}s</div>",
+                    f"<div style='font-size: 1.4rem; font-weight: bold; text-align: center;'>💨 {airtime['flojector']:.2f}s</div>",
                     unsafe_allow_html=True
                 )
                 st.caption("Flojector")
             with col_ejector:
                 st.markdown(
-                    f"<div style='font-size: 1.8rem; font-weight: bold; text-align: center;'>🚀 {airtime['ejector']:.2f}s</div>",
+                    f"<div style='font-size: 1.4rem; font-weight: bold; text-align: center;'>🚀 {airtime['ejector']:.2f}s</div>",
                     unsafe_allow_html=True
                 )
                 st.caption("Ejector")
             with col_total:
                 st.markdown(
-                    f"<div style='font-size: 1.8rem; font-weight: bold; text-align: center; color: #FFD700;'>Σ {airtime['total_airtime']:.2f}s</div>",
+                    f"<div style='font-size: 1.4rem; font-weight: bold; text-align: center; color: #FFD700;'>Σ {airtime['total_airtime']:.2f}s</div>",
                     unsafe_allow_html=True
                 )
                 st.caption("Total")
@@ -1486,21 +1795,21 @@ if st.session_state.track_generated:
         else:
             st.caption("✅ Track angles within safe limits (<30°)")
         
-        # Curvature smoothness indicator
-        if hasattr(st.session_state, 'track_curvature'):
-            curvature = st.session_state.track_curvature
-            max_curvature = np.max(curvature)
-            avg_curvature = np.mean(curvature)
-            
-            st.markdown("**Track Smoothness:**")
-            st.text(f"Avg: {avg_curvature:.4f} | Max: {max_curvature:.4f}")
-            
-            if max_curvature < 0.01:
-                st.caption("✅ Very smooth track")
-            elif max_curvature < 0.05:
-                st.caption("✅ Smooth track")
-            else:
-                st.caption("⚠️ Some tight curves present")
+        # Curvature smoothness indicator (commented out)
+        # if hasattr(st.session_state, 'track_curvature'):
+        #     curvature = st.session_state.track_curvature
+        #     max_curvature = np.max(curvature)
+        #     avg_curvature = np.mean(curvature)
+        #     
+        #     st.markdown("**Track Smoothness:**")
+        #     st.text(f"Avg: {avg_curvature:.4f} | Max: {max_curvature:.4f}")
+        #     
+        #     if max_curvature < 0.01:
+        #         st.caption("✅ Very smooth track")
+        #     elif max_curvature < 0.05:
+        #         st.caption("✅ Smooth track")
+        #     else:
+        #         st.caption("⚠️ Some tight curves present")
         
         # Block breakdown - compact format
         st.markdown("**Block Sequence:**")
@@ -1518,6 +1827,111 @@ if st.session_state.track_generated:
     
     st.divider()
     
+    # Particle Simulation along the track (on-demand) - FULL WIDTH
+    st.markdown("**🎬 Particle Simulation (Track Traversal)**")
+    run_sim = st.button("Run Particle Simulation")
+    if run_sim and 'accel_df' in st.session_state and 'track_x' in st.session_state and 'track_y' in st.session_state:
+        sim_time = st.session_state.accel_df['Time'].values
+        x = np.array(st.session_state.track_x)
+        y = np.array(st.session_state.track_y)
+        n = len(x)
+        # Build fractional indices across the track to avoid stalls between points
+        if len(sim_time) <= 1 or n <= 1:
+            st.info("Not enough points to simulate.")
+        else:
+            idx_float = np.linspace(0, n - 1, len(sim_time))
+            i0 = np.floor(idx_float).astype(int)
+            i1 = np.minimum(i0 + 1, n - 1)
+            alpha = idx_float - i0
+            xp = x[i0] * (1 - alpha) + x[i1] * alpha
+            yp = y[i0] * (1 - alpha) + y[i1] * alpha
+            # Compute smooth tangents from interpolated points using central differences
+            tx = np.zeros_like(xp)
+            ty = np.zeros_like(yp)
+            for k in range(len(xp)):
+                if k == 0:
+                    dxk = xp[1] - xp[0]
+                    dyk = yp[1] - yp[0]
+                elif k == len(xp) - 1:
+                    dxk = xp[-1] - xp[-2]
+                    dyk = yp[-1] - yp[-2]
+                else:
+                    dxk = xp[k + 1] - xp[k - 1]
+                    dyk = yp[k + 1] - yp[k - 1]
+                normk = np.hypot(dxk, dyk)
+                if normk == 0:
+                    tx[k], ty[k] = 1.0, 0.0
+                else:
+                    tx[k], ty[k] = dxk / normk, dyk / normk
+            # Normals from tangents
+            nx = -ty
+            ny = tx
+            # Enforce normal continuity to avoid flips at segment boundaries
+            for k in range(1, len(nx)):
+                if nx[k - 1] * nx[k] + ny[k - 1] * ny[k] < 0:
+                    nx[k] = -nx[k]
+                    ny[k] = -ny[k]
+
+            import plotly.graph_objects as go
+            # Use the same vertical g column as other plots: 'Vertical'
+            df = st.session_state.accel_df
+            vert_g = df['Vertical'].values if 'Vertical' in df.columns else None
+            # Scale factor for arrow length per 1g
+            arrow_scale = 2.0
+            # Downsample frames if very long to keep UI responsive
+            max_frames = 900
+            if len(xp) > max_frames:
+                step = int(np.ceil(len(xp) / max_frames))
+            else:
+                step = 1
+            frames = []
+            for i in range(0, len(xp), step):
+                # Use precomputed smooth normals
+                nxi, nyi = nx[i], ny[i]
+                # Acceleration vector along normal using vertical g if available
+                if vert_g is not None and i < len(vert_g):
+                    axv = arrow_scale * vert_g[i] * nxi
+                    ayv = arrow_scale * vert_g[i] * nyi
+                    accel_trace = go.Scatter(x=[xp[i], xp[i] + axv], y=[yp[i], yp[i] + ayv], mode='lines',
+                                             line=dict(color='#2ca02c', width=3), name='Acceleration')
+                else:
+                    accel_trace = go.Scatter(x=[xp[i], xp[i]], y=[yp[i], yp[i]], mode='lines',
+                                             line=dict(color='#2ca02c', width=3), name='Acceleration')
+                frames.append(go.Frame(data=[
+                    go.Scatter(x=x, y=y, mode='lines', line=dict(color='rgb(255,75,75)', width=3), name='Track'),
+                    go.Scatter(x=[xp[i]], y=[yp[i]], mode='markers', marker=dict(size=12, color='#1f77b4'), name='Particle'),
+                    accel_trace
+                ], name=str(i)))
+
+            fig_sim = go.Figure(
+                data=[
+                    go.Scatter(x=x, y=y, mode='lines', line=dict(color='rgb(255,75,75)', width=3), name='Track'),
+                    go.Scatter(x=[xp[0]], y=[yp[0]], mode='markers', marker=dict(size=12, color='#1f77b4'), name='Particle')
+                ],
+                frames=frames
+            )
+            # Add initial acceleration vector to match frame traces if available
+            # Initial acceleration vector using smooth normal
+            if vert_g is not None and len(vert_g) > 0:
+                axv0 = arrow_scale * vert_g[0] * nx[0]
+                ayv0 = arrow_scale * vert_g[0] * ny[0]
+                fig_sim.add_trace(go.Scatter(x=[xp[0], xp[0] + axv0], y=[yp[0], yp[0] + ayv0], mode='lines',
+                                             line=dict(color='#2ca02c', width=3), name='Acceleration'))
+            fig_sim.update_layout(
+                xaxis_title='Distance (m)', yaxis_title='Height (m)',
+                height=400, margin=dict(l=20, r=20, t=30, b=20),
+                updatemenus=[{
+                    'type': 'buttons',
+                    'buttons': [
+                        {'label': 'Play', 'method': 'animate', 'args': [None, {'fromcurrent': True, 'frame': {'duration': 30, 'redraw': True}, 'transition': {'duration': 0}}]},
+                        {'label': 'Pause', 'method': 'animate', 'args': [[None], {'mode': 'immediate', 'transition': {'duration': 0}, 'frame': {'duration': 0, 'redraw': False}}]}
+                    ]
+                }]
+            )
+            st.plotly_chart(fig_sim, use_container_width=True)
+    
+    st.divider()
+    
     # Show smoothness warnings (joint info hidden)
     info_col1, info_col2 = st.columns(2)
     with info_col2:
@@ -1525,58 +1939,12 @@ if st.session_state.track_generated:
             st.warning(st.session_state.smoothness_warning)
     
     # Ride configuration
-    st.subheader("⚙️ Ride Configuration")
-    initial_speed = st.slider("Initial Speed (m/s)", 5.0, 30.0, 15.0, 1.0, key="speed_slider")
-    st.caption("Launch speed or chain lift speed")
-    st.session_state.initial_speed = initial_speed
+    #st.subheader("⚙️ Ride Configuration")
+    #initial_speed = st.slider("Initial Speed (m/s)", 5.0, 30.0, 15.0, 1.0, key="speed_slider")
+    #st.caption("Launch speed or chain lift speed")
+    #st.session_state.initial_speed = initial_speed
     
-    st.divider()
-    
-    # Row 1.5: Curvature Analysis
-    if hasattr(st.session_state, 'track_curvature'):
-        st.markdown("**Track Curvature Profile**")
-        
-        fig_curve = go.Figure()
-        
-        # Calculate distance along track
-        x = st.session_state.track_x
-        y = st.session_state.track_y
-        dx = np.diff(x, prepend=x[0])
-        dy = np.diff(y, prepend=y[0])
-        distance = np.cumsum(np.sqrt(dx**2 + dy**2))
-        
-        curvature = st.session_state.track_curvature
-        
-        # Plot curvature
-        fig_curve.add_trace(go.Scatter(
-            x=distance,
-            y=curvature,
-            mode='lines',
-            line=dict(color='purple', width=2),
-            fill='tozeroy',
-            fillcolor='rgba(128, 0, 128, 0.1)',
-            name='Curvature',
-            hovertemplate='Distance: %{x:.1f}m<br>Curvature: %{y:.4f}<extra></extra>'
-        ))
-        
-        # Add threshold lines
-        fig_curve.add_hline(y=0.01, line_dash="dash", line_color="green", 
-                           annotation_text="Smooth", annotation_position="right")
-        fig_curve.add_hline(y=0.05, line_dash="dash", line_color="orange",
-                           annotation_text="Tight", annotation_position="right")
-        
-        fig_curve.update_layout(
-            xaxis_title="Distance Along Track (m)",
-            yaxis_title="Curvature (1/m)",
-            showlegend=False,
-            height=200,
-            margin=dict(l=20, r=20, t=10, b=40)
-        )
-        
-        st.plotly_chart(fig_curve, use_container_width=True)
-        st.caption("💡 Lower curvature = smoother ride. Spikes indicate sharp transitions.")
-    
-    st.divider()
+    #st.divider()
     
     # Row 2: G-Force Analysis
     st.markdown("**G-Force Analysis**")
@@ -1647,16 +2015,235 @@ if st.session_state.track_generated:
         for i in range(1, 4):
             fig_g.add_hline(y=0, line_dash="dash", line_color="gray", row=i, col=1)
         
+        # Calculate y-axis ranges: default -5 to 5, extend to -10 to 10 if needed
+        vertical_max = accel_df['Vertical'].max()
+        vertical_min = accel_df['Vertical'].min()
+        lateral_max = accel_df['Lateral'].max()
+        lateral_min = accel_df['Lateral'].min()
+        longitudinal_max = accel_df['Longitudinal'].max()
+        longitudinal_min = accel_df['Longitudinal'].min()
+        
+        # Determine y-axis range for each subplot
+        def get_y_range(data_min, data_max):
+            """Get y-axis range: default -5 to 5, extend to -10 to 10 if data exceeds ±5"""
+            if data_max > 5 or data_min < -5:
+                return [-10, 10]
+            else:
+                return [-5, 5]
+        
+        y_range_vertical = get_y_range(vertical_min, vertical_max)
+        y_range_lateral = get_y_range(lateral_min, lateral_max)
+        y_range_longitudinal = get_y_range(longitudinal_min, longitudinal_max)
+        
+        # Set y-axis ranges for each subplot
+        fig_g.update_yaxes(range=y_range_vertical, row=1, col=1)
+        fig_g.update_yaxes(range=y_range_lateral, row=2, col=1)
+        fig_g.update_yaxes(range=y_range_longitudinal, row=3, col=1)
+        
         fig_g.update_xaxes(title_text="Time (s)", row=3, col=1)
         fig_g.update_yaxes(title_text="G", row=2, col=1)
         
         fig_g.update_layout(
-            height=500,
+            height=700,  # Increased from 500 to 700 for better y-axis visibility
             showlegend=False,
             margin=dict(l=20, r=20, t=50, b=20)
         )
         
         st.plotly_chart(fig_g, use_container_width=True)
+    
+    # Curvature Profile (collapsible, hidden by default)
+    if hasattr(st.session_state, 'track_curvature'):
+        if st.checkbox("Show Curvature Profile", value=False, key="show_curvature_profile"):
+            st.markdown("**Track Curvature Profile**")
+            
+            fig_curve = go.Figure()
+            
+            # Calculate distance along track
+            x = st.session_state.track_x
+            y = st.session_state.track_y
+            dx = np.diff(x, prepend=x[0])
+            dy = np.diff(y, prepend=y[0])
+            distance = np.cumsum(np.sqrt(dx**2 + dy**2))
+            
+            curvature = st.session_state.track_curvature
+            
+            # Plot curvature
+            fig_curve.add_trace(go.Scatter(
+                x=distance,
+                y=curvature,
+                mode='lines',
+                line=dict(color='purple', width=2),
+                fill='tozeroy',
+                fillcolor='rgba(128, 0, 128, 0.1)',
+                name='Curvature',
+                hovertemplate='Distance: %{x:.1f}m<br>Curvature: %{y:.4f}<extra></extra>'
+            ))
+            
+            # Add threshold lines
+            fig_curve.add_hline(y=0.01, line_dash="dash", line_color="green", 
+                               annotation_text="Smooth", annotation_position="right")
+            fig_curve.add_hline(y=0.05, line_dash="dash", line_color="orange",
+                               annotation_text="Tight", annotation_position="right")
+            
+            fig_curve.update_layout(
+                xaxis_title="Distance Along Track (m)",
+                yaxis_title="Curvature (1/m)",
+                showlegend=False,
+                height=200,
+                margin=dict(l=20, r=20, t=10, b=40)
+            )
+            
+            st.plotly_chart(fig_curve, use_container_width=True)
+            st.caption("💡 Lower curvature = smoother ride. Spikes indicate sharp transitions.")
+    
+    # Speed Profile (collapsible, hidden by default)
+    if st.checkbox("Show Speed Profile", value=False, key="show_speed_profile"):
+        st.markdown("**🚄 Speed Profile**")
+        if 'accel_df' in st.session_state:
+            # Get speed data from the acceleration computation
+            # We need to recalculate or access it from the physics engine
+            from utils.accelerometer_transform import compute_rider_accelerations
+            
+            # Recompute to get velocity data
+            track_df = pd.DataFrame({
+                'x': st.session_state.track_x,
+                'y': st.session_state.track_y,
+                'z': st.session_state.get('track_z', np.zeros_like(st.session_state.track_x))
+            })
+            
+            # Get the velocity from physics calculation
+            from utils.acceleration import compute_acc_profile
+            x = track_df['x'].values
+            y = track_df['y'].values
+            z = track_df['z'].values
+            # Track: (x, y, z) = (forward, vertical, lateral)
+            # Physics expects: (x, y, z) where z is vertical
+            # So we map: track_x→physics_x, track_z→physics_y, track_y→physics_z
+            points = np.column_stack([x, z, y])
+            
+            # Detect launch blocks and calculate their positions
+            # Launch sections: (start_x, end_x, target_speed)
+            launch_sections = []
+            cumulative_x = 0
+            for block_info in st.session_state.track_sequence:
+                block_type = block_info['type']
+                x_block, y_block, z_block = block_info['block'].generate_profile(**block_info['params'])
+                block_length = x_block[-1] if len(x_block) > 0 else 0
+                
+                if block_type == 'launch' and 'speed_boost' in block_info['params']:
+                    launch_start_x = cumulative_x
+                    launch_end_x = cumulative_x + block_length
+                    target_speed = block_info['params']['speed_boost']  # m/s
+                    launch_sections.append((launch_start_x, launch_end_x, target_speed))
+                
+                cumulative_x += block_length
+            
+            v0 = 0.0  # Always start from rest - launch will accelerate
+            
+            acc_result = compute_acc_profile(
+                points,
+                dt=0.02,
+                mass=st.session_state.get('physics_mass', 500.0),
+                rho=st.session_state.get('physics_rho', 1.2),
+                Cd=st.session_state.get('physics_Cd', 0.1),
+                A=st.session_state.get('physics_A', 2.0),
+                mu=st.session_state.get('physics_mu', 0.001),
+                v0=v0,  # Start from rest
+                use_energy_conservation=True,
+                launch_sections=launch_sections  # Pass launch sections for proper acceleration
+            )
+            
+            velocity = acc_result['v']  # m/s
+            
+            # Calculate time based on travel distance and speed
+            # For energy conservation mode, integrate dt = ds/v along the track
+            # Calculate distance between consecutive points
+            ds = np.zeros(len(points))
+            for i in range(1, len(points)):
+                ds[i] = np.linalg.norm(points[i] - points[i-1])
+            
+            # Calculate time by integrating dt = ds/v
+            # Use a reasonable minimum velocity to prevent unrealistic time steps
+            time = np.zeros(len(velocity))
+            time[0] = 0.0
+            
+            for i in range(1, len(velocity)):
+                if ds[i] > 1e-6:  # Only if there's meaningful distance
+                    # Average velocity over this segment
+                    v_avg = 0.5 * (velocity[i-1] + velocity[i])
+                    # Use minimum of 5 m/s (18 km/h) to prevent huge time steps
+                    # This is reasonable for a roller coaster (even slow sections are usually > 18 km/h)
+                    v_avg = max(v_avg, 5.0)
+                    dt = ds[i] / v_avg
+                    # Also cap maximum time step to prevent unrealistic jumps
+                    # If a single step takes > 5 seconds, something is wrong
+                    dt = min(dt, 2.0)  # Cap at 2 seconds per segment
+                    time[i] = time[i-1] + dt
+                else:
+                    # If no distance, use small time step (interpolated point)
+                    time[i] = time[i-1] + 0.01  # 10ms step
+            
+            # Sanity check: if total time is unrealistic (> 60s for typical coaster),
+            # recalculate using average speed approach
+            if time[-1] > 60.0:
+                # Fallback: use total distance / average speed
+                total_distance = ds.sum()
+                avg_speed = velocity.mean()
+                avg_speed = max(avg_speed, 8.0)  # Minimum 8 m/s (28.8 km/h) - reasonable for coasters
+                total_time_estimate = total_distance / avg_speed
+                # Distribute time proportionally to cumulative distance
+                s_cumulative = np.cumsum(ds)
+                if total_distance > 0:
+                    time = (s_cumulative / total_distance) * total_time_estimate
+                else:
+                    # Fallback to fixed time step if no distance
+                    time = np.linspace(0, len(velocity) * 0.02, len(velocity))
+            
+            # Display speed in m/s (no conversion needed - velocity is already in m/s)
+            
+            # Debug: Check if speed is varying
+            speed_std = velocity.std()
+            speed_range = velocity.max() - velocity.min()
+            
+            # Debug output to verify initial speed
+            st.caption(f"🔍 Speed at start: {velocity[0]:.1f} m/s | at 1s: {velocity[int(1.0/0.02)]:.1f} m/s | Max: {velocity.max():.1f} m/s")
+            
+            fig_speed = go.Figure()
+            fig_speed.add_trace(
+                go.Scatter(x=time, y=velocity,
+                          name='Speed', line=dict(color='purple', width=3),
+                          fill='tozeroy', fillcolor='rgba(128, 0, 128, 0.2)',
+                          hovertemplate='Time: %{x:.1f}s<br>Speed: %{y:.1f} m/s<extra></extra>')
+            )
+            
+            # Add markers for max and min speeds
+            max_speed_idx = np.argmax(velocity)
+            min_speed_idx = np.argmin(velocity)
+            
+            fig_speed.add_trace(
+                go.Scatter(x=[time[max_speed_idx]], y=[velocity[max_speed_idx]],
+                          mode='markers+text', marker=dict(size=10, color='red'),
+                          text=[f"Max: {velocity[max_speed_idx]:.1f} m/s"],
+                          textposition="top center", name='Max Speed', showlegend=False)
+            )
+            
+            fig_speed.update_layout(
+                xaxis_title="Time (s)",
+                yaxis_title="Speed (m/s)",
+                height=300,
+                margin=dict(l=20, r=20, t=30, b=20),
+                showlegend=False,
+                yaxis=dict(range=[0, max(velocity.max() * 1.1, 5)])  # Ensure proper y-axis scale
+            )
+            
+            st.plotly_chart(fig_speed, use_container_width=True)
+            
+            # Display speed statistics
+            col_speed1, col_speed2, col_speed3, col_speed4 = st.columns(4)
+            col_speed1.metric("Max Speed", f"{velocity.max():.1f} m/s")
+            col_speed2.metric("Avg Speed", f"{velocity.mean():.1f} m/s")
+            col_speed3.metric("Min Speed", f"{velocity.min():.1f} m/s")
+            col_speed4.metric("Variation", f"{speed_range:.1f} m/s", help="Difference between max and min speed")
 
     # Egg Plot Visualization (comfort envelopes)
     if 'accel_df' in st.session_state:

@@ -30,7 +30,7 @@ def _default_library_specs() -> List[Dict]:
         {
             'name': 'simple_loop_1',
             'elements': [
-                {'type': 'drop', 'params': {'height': 30, 'steepness': 0.85}},
+                {'type': 'drop', 'params': {'height': 80, 'steepness': 0.85}},
                 {'type': 'flat_section', 'params': {'length': 30}},
                 {'type': 'clothoid_loop', 'params': {'radius': 12, 'transition_length': 15}},
                 {'type': 'parabolic_curve', 'params': {'amplitude': 6, 'length': 40}},

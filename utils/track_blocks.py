@@ -1,8 +1,8 @@
 import numpy as np
 
 
-def lift_hill_profile(length=50, height=40, **kwargs):
-    max_realistic_height = length * 0.8
+def lift_hill_profile(length=100, height=80, **kwargs):
+    max_realistic_height = max(height, length * 0.8)  # allow up to 80m
     actual_height = min(height, max_realistic_height)
 
     entry_length = length * 0.15
@@ -106,26 +106,25 @@ def loop_profile(diameter=30, **kwargs):
 
 
 def airtime_hill_profile(length=40, height=15, **kwargs):
+    """Smooth airtime hill using a single continuous function to avoid curvature spikes."""
     max_safe_height = length * 0.5
     actual_height = min(height, max_safe_height)
 
-    entry_length = length * 0.35
-    x_entry = np.linspace(0, entry_length, 20)
-    entry_progress = x_entry / entry_length
-    y_entry = actual_height * entry_progress ** 3 * 0.3
-
-    main_length = length * 0.3
-    x_main = np.linspace(entry_length, entry_length + main_length, 20)
-    main_progress = (x_main - entry_length) / main_length
-    y_main = actual_height * (0.3 + 0.7 * (1 - (2 * main_progress - 1) ** 2))
-
-    exit_length = length * 0.35
-    x_exit = np.linspace(entry_length + main_length, length, 20)
-    exit_progress = (x_exit - (entry_length + main_length)) / exit_length
-    y_exit = actual_height * (1 - exit_progress) ** 3 * 0.3
-
-    x = np.concatenate([x_entry, x_main, x_exit])
-    y = np.concatenate([y_entry, y_main, y_exit])
+    # Use more points for smoother curvature
+    n_points = 60
+    x = np.linspace(0, length, n_points)
+    progress = x / length
+    
+    # Smooth hill profile using a combination of sine and polynomial
+    # This ensures continuous derivatives (smooth curvature)
+    # Shape: gentle rise -> sustained peak -> gentle descent
+    y = actual_height * (
+        # Smooth rise and fall using sine
+        np.sin(np.pi * progress) ** 2 * 
+        # Add slight plateau at peak using polynomial shaping
+        (1 - 0.4 * np.abs(2 * progress - 1) ** 3)
+    )
+    
     z = np.zeros_like(x)  # No banking on airtime hill
     return x, y, z
 
@@ -229,13 +228,30 @@ def launch_profile(length=40, speed_boost=20.0, **kwargs):
         speed_boost: Target speed increase in m/s (e.g., 20 m/s = 72 km/h)
         
     Note: The speed boost is applied in the physics engine by detecting this block type.
-    The track itself is flat with slight incline for realism.
+    The track itself is completely flat to provide a straight acceleration zone.
     """
     n_points = max(30, int(length / 1.5))  # Denser sampling for launch detection
     x = np.linspace(0, length, n_points)
     
-    # Slight downward slope during launch (realistic for many launched coasters)
-    y = -0.5 * (x / length)  # 0.5m drop over the launch
+    # Completely flat for linear acceleration
+    y = np.zeros_like(x)
+    z = np.zeros_like(x)  # No banking
+    return x, y, z
+
+
+def brake_run_profile(length=30, **kwargs):
+    """Brake run section that slows the train to a stop.
     
+    Args:
+        length: Length of brake section in meters
+        
+    Note: This provides a safe deceleration zone at the end of the ride.
+    The track is flat and straight for smooth, comfortable braking.
+    """
+    n_points = max(20, int(length / 1.5))
+    x = np.linspace(0, length, n_points)
+    
+    # Completely flat
+    y = np.zeros_like(x)
     z = np.zeros_like(x)  # No banking
     return x, y, z

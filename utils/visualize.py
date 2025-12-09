@@ -44,7 +44,28 @@ def plot_gforce_timeseries(accel_df: pd.DataFrame) -> go.Figure:
     fig.add_trace(go.Scatter(x=accel_df['Time'], y=accel_df['Vertical'], name='Vertical', line=dict(color='#1f77b4')), row=1, col=1)
     fig.add_trace(go.Scatter(x=accel_df['Time'], y=accel_df['Lateral'], name='Lateral', line=dict(color='#ff7f0e')), row=2, col=1)
     fig.add_trace(go.Scatter(x=accel_df['Time'], y=accel_df['Longitudinal'], name='Longitudinal', line=dict(color='#2ca02c')), row=3, col=1)
-    fig.update_layout(height=600, showlegend=False, margin=dict(l=40, r=20, t=40, b=40))
+    
+    # Calculate y-axis ranges: default -5 to 5, extend to -10 to 10 if needed
+    def get_y_range(data_min, data_max):
+        """Get y-axis range: default -5 to 5, extend to -10 to 10 if data exceeds ±5"""
+        if data_max > 5 or data_min < -5:
+            return [-10, 10]
+        else:
+            return [-5, 5]
+    
+    vertical_max = accel_df['Vertical'].max()
+    vertical_min = accel_df['Vertical'].min()
+    lateral_max = accel_df['Lateral'].max()
+    lateral_min = accel_df['Lateral'].min()
+    longitudinal_max = accel_df['Longitudinal'].max()
+    longitudinal_min = accel_df['Longitudinal'].min()
+    
+    # Set y-axis ranges for each subplot
+    fig.update_yaxes(range=get_y_range(vertical_min, vertical_max), row=1, col=1)
+    fig.update_yaxes(range=get_y_range(lateral_min, lateral_max), row=2, col=1)
+    fig.update_yaxes(range=get_y_range(longitudinal_min, longitudinal_max), row=3, col=1)
+    
+    fig.update_layout(height=800, showlegend=False, margin=dict(l=40, r=20, t=40, b=40))  # Increased from 600 to 800 for better y-axis visibility
     return fig
 
 
