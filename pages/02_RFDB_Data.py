@@ -9,7 +9,7 @@ from utils.cloud_data_loader import load_rfdb_csv, list_rfdb_parks, list_rfdb_co
 st.set_page_config(page_title="RFDB Data Analysis", page_icon="📊", layout="wide")
 
 st.title("📊 RFDB Data Analysis")
-st.caption("Load real RFDB CSVs and visualize g-forces and egg plots")
+#st.caption("Load real RFDB CSVs and visualize g-forces and egg plots")
 
 # Get RFDB root directory - handle both local and deployed environments
 _script_dir = os.path.dirname(os.path.abspath(__file__))
