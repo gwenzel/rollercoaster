@@ -517,7 +517,17 @@ def compute_acc_profile(points: np.ndarray,
     # Use the speed derivative as it's more direct and captures all effects
     a_tan_effective = a_tan_from_speed
     
+    # Total inertial acceleration: tangential + centripetal
+    # a_tan already includes gravity's effect along the tangent (via g_par_mag in the integration)
+    # a_eq is centripetal acceleration (points toward center of curvature)
+    # Note: a_tot does NOT include gravity vector explicitly - gravity is already accounted for
+    # in a_tan (along track) and will be handled by the normal force (perpendicular to track)
     a_tot = a_tan_effective.reshape(-1, 1) * e_tan + a_eq
+    
+    # Specific force (what accelerometer/passenger feels) = total acceleration - gravity
+    # This is the relative acceleration that the passenger experiences
+    # The standard formula: f_spec = a_tot - G_VEC
+    # This gives the acceleration relative to free-fall (what an accelerometer measures)
     f_spec = a_tot - G_VEC
 
     # Calculate 3D velocity from position differences (finite differences)

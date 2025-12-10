@@ -54,7 +54,7 @@ class StreamlitBiGRUPredictor:
         
         # Define the notebook's BiGRU model architecture (matched to checkpoint)
         class BiGRURegressor(nn.Module):
-            def __init__(self, input_size_accel=3, input_size_airtime=4, hidden_size=128, num_layers=1, dropout=0.3):
+            def __init__(self, input_size_accel=3, input_size_airtime=3, hidden_size=128, num_layers=1, dropout=0.3):  # Updated to 3 airtime features to match notebook
                 super(BiGRURegressor, self).__init__()
                 self.gru = nn.GRU(
                     input_size=input_size_accel,
@@ -117,8 +117,8 @@ class StreamlitBiGRUPredictor:
             # If still None, create dummy fitted scalers
             if self.predictor.scaler_airtime is None:
                 self.predictor.scaler_airtime = StandardScaler()
-                # Fit with dummy airtime feature ranges
-                dummy_airtime = np.random.randn(1000, 4)
+                # Fit with dummy airtime feature ranges (3 features: total_length, floater_prop, flojector_prop)
+                dummy_airtime = np.random.randn(1000, 3)
                 self.predictor.scaler_airtime.fit(dummy_airtime)
                 print("⚠ Created fitted scaler for airtime features (using dummy data)")
             
@@ -142,7 +142,7 @@ class StreamlitBiGRUPredictor:
             cfg = checkpoint.get('model_config', {})
             self.predictor.model = BiGRURegressor(
                 input_size_accel=cfg.get('accel_input_size', 3),
-                input_size_airtime=cfg.get('airtime_feature_size', 4),
+                input_size_airtime=cfg.get('airtime_feature_size', 3),  # Updated to match notebook: 3 features (Total Length, Floater %, Flojector %)
                 hidden_size=cfg.get('hidden_dim', 128),
                 num_layers=cfg.get('num_layers', 1),
                 dropout=cfg.get('dropout_rate', 0.3),
@@ -206,15 +206,29 @@ class StreamlitBiGRUPredictor:
             # Acceleration passes through (no accel scaler needed)
             accel_tensor = torch.FloatTensor(acceleration_data).unsqueeze(0).to(self.predictor.device)
             
-            # Compute airtime features from Vertical g channel
+            # Compute airtime features from Vertical g channel using notebook definitions
+            # Notebook definitions:
+            # - Floater: -0.5g <= Vertical < 0.0g
+            # - Flojector: -1.0g <= Vertical < -0.5g
+            # - Ejector: Vertical < -1.0g (not used in features, but kept for reference)
             v = acceleration_data[:, 1].astype(float)
-            airtime_mask = v < 0.2
-            airtime_count = int(np.sum(airtime_mask))
-            airtime_ratio = float(np.mean(airtime_mask)) if len(v) > 0 else 0.0
-            min_vertical_g = float(np.min(v)) if len(v) > 0 else 1.0
-            transitions = np.diff(airtime_mask.astype(int)) if len(v) > 1 else np.array([])
-            segments = int(np.sum(transitions == 1)) if transitions.size > 0 else 0
-            airtime_features = np.array([[airtime_count, airtime_ratio, min_vertical_g, segments]], dtype=float)
+            total_samples = len(v)
+            
+            # Calculate total length in log-seconds (matching notebook)
+            # Assuming 10Hz sampling rate (0.1s per sample)
+            total_seconds = total_samples / 10.0
+            total_length_seconds = np.log1p(total_seconds)  # log(1 + seconds)
+            
+            # Airtime thresholds (vertical g-force)
+            floater_airtime_mask = (v < 0.0) & (v >= -0.5)
+            flojector_airtime_mask = (v < -0.5) & (v >= -1.0)
+            
+            # Calculate proportions (matching notebook)
+            floater_airtime_proportion = float(np.sum(floater_airtime_mask) / total_samples) if total_samples > 0 else 0.0
+            flojector_airtime_proportion = float(np.sum(flojector_airtime_mask) / total_samples) if total_samples > 0 else 0.0
+            
+            # Create airtime features array matching notebook format: [total_length_seconds, floater_proportion, flojector_proportion]
+            airtime_features = np.array([[total_length_seconds, floater_airtime_proportion, flojector_airtime_proportion]], dtype=float)
             # Normalize airtime features if scaler available
             if self.predictor.scaler_airtime is not None:
                 airtime_features = self.predictor.scaler_airtime.transform(airtime_features)

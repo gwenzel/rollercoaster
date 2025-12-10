@@ -9,6 +9,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from scipy.interpolate import splprep, splev
+from scipy import stats
 import sys
 import os
 
@@ -1304,10 +1305,10 @@ def check_gforce_safety(accel_df):
 
 def compute_airtime_metrics(accel_df):
     """Compute airtime metrics from vertical g data.
-    Categories (by vertical g in g-units):
-    - Floater Airtime: -0.25g <= Vertical <= 0.25g
-    - Flojector Airtime: (-0.75g <= Vertical < -0.25g) OR (0.25g < Vertical <= 0.75g)
-    - Ejector Airtime: Vertical < -0.75g OR Vertical > 0.75g
+    Categories match notebook definition (by vertical g in g-units):
+    - Floater Airtime: -0.5g <= Vertical < 0.0g
+    - Flojector Airtime: -1.0g <= Vertical < -0.5g
+    - Ejector Airtime: Vertical < -1.0g (not used in notebook, but kept for display)
 
     Returns seconds for each category and total airtime.
     Uses time spacing from 'Time' column.
@@ -1322,14 +1323,14 @@ def compute_airtime_metrics(accel_df):
     else:
         dt = float(np.median(np.diff(t)))
 
-    # Floater: between -0.25 and 0.25
-    floater_mask = (g >= -0.25) & (g <= 0.25)
+    # Notebook definition: floater < 0.0 and >= -0.5
+    floater_mask = (g < 0.25) & (g >= -0.25)
     
-    # Flojector: between -0.75 and -0.25, OR between 0.25 and 0.75
-    flojector_mask = ((g >= -0.75) & (g < -0.25)) | ((g > 0.25) & (g <= 0.75))
+    # Notebook definition: flojector < -0.5 and >= -1.0
+    flojector_mask = (g < -0.25) & (g >= -0.75)
     
-    # Ejector: higher than 0.75 or lower than -0.75
-    ejector_mask = (g < -0.75) | (g > 0.75)
+    # Ejector: < -1.0g (extreme airtime)
+    ejector_mask = (g < -0.75)
 
     floater_time = float(floater_mask.sum() * dt)
     flojector_time = float(flojector_mask.sum() * dt)
@@ -1341,6 +1342,125 @@ def compute_airtime_metrics(accel_df):
         'flojector': flojector_time,
         'ejector': ejector_time,
         'total_airtime': total_airtime,
+        # Additional metrics for feature calculation
+        'floater_proportion': float(floater_mask.sum() / len(g)) if len(g) > 0 else 0.0,
+        'flojector_proportion': float(flojector_mask.sum() / len(g)) if len(g) > 0 else 0.0,
+        'total_length_seconds': float(len(g) * dt),
+    }
+
+def calculate_ride_features(accel_df):
+    """Calculate comprehensive ride features inspired by notebook.
+    Returns a dictionary with all calculated features.
+    """
+    if accel_df is None or len(accel_df) == 0:
+        return {}
+    
+    if not all(col in accel_df.columns for col in ['Vertical', 'Lateral', 'Longitudinal']):
+        return {}
+    
+    # Extract forces
+    vertical = accel_df['Vertical'].values
+    lateral = accel_df['Lateral'].values
+    longitudinal = accel_df['Longitudinal'].values
+    
+    # Calculate total g-force magnitude
+    total_g = np.sqrt(vertical**2 + lateral**2 + longitudinal**2)
+    
+    # === BASIC FEATURES ===
+    num_positive_g = np.sum(vertical > 3.0)
+    max_neg_vert = np.min(vertical) if len(vertical) > 0 else 0.0
+    max_pos_vert = np.max(vertical) if len(vertical) > 0 else 0.0
+    max_lateral = np.max(np.abs(lateral)) if len(lateral) > 0 else 0.0
+    max_longitudinal = np.max(np.abs(longitudinal)) if len(longitudinal) > 0 else 0.0
+    
+    # === SMOOTHNESS/RHYTHM ===
+    vert_variance = np.var(vertical) if len(vertical) > 0 else 0.0
+    lat_variance = np.var(lateral) if len(lateral) > 0 else 0.0
+    vert_jerk = np.mean(np.abs(np.diff(vertical))) if len(vertical) > 1 else 0.0
+    avg_total_g = np.mean(total_g) if len(total_g) > 0 else 0.0
+    
+    # === ADVANCED FEATURES ===
+    
+    # 1. AIRTIME x G-FORCE INTERACTION
+    airtime_ratio = np.sum(vertical < 0) / len(vertical) if len(vertical) > 0 else 0.0
+    positive_g_ratio = np.sum(vertical > 2.0) / len(vertical) if len(vertical) > 0 else 0.0
+    airtime_gforce_interaction = airtime_ratio * positive_g_ratio * 10.0
+    
+    # 2. G-FORCE RANGE
+    g_force_range = (max_pos_vert - max_neg_vert) if (max_pos_vert > 0 or max_neg_vert < 0) else 0.0
+    
+    # 3. LATERAL JERK
+    lateral_jerk = np.mean(np.abs(np.diff(lateral))) if len(lateral) > 1 else 0.0
+    
+    # 4. G-FORCE SKEWNESS
+    try:
+        g_skewness = stats.skew(vertical) if len(vertical) > 3 else 0.0
+    except:
+        g_skewness = 0.0
+    
+    # 5. INTENSITY PACING
+    mid_point = len(total_g) // 2
+    if mid_point > 0:
+        first_half_intensity = np.mean(total_g[:mid_point])
+        second_half_intensity = np.mean(total_g[mid_point:])
+        intensity_pacing = first_half_intensity / (second_half_intensity + 0.1)
+    else:
+        intensity_pacing = 1.0
+    
+    # 6. FORCE TRANSITIONS
+    if len(total_g) > 1:
+        g_transitions = np.std(np.diff(total_g))
+    else:
+        g_transitions = 0.0
+    
+    # 7. PEAK DENSITY
+    high_g_threshold = np.percentile(total_g, 90) if len(total_g) > 10 else 3.0
+    high_g_moments = total_g > high_g_threshold
+    if np.sum(high_g_moments) > 0:
+        peak_density = np.sum(high_g_moments) / (len(total_g) / 100.0)
+    else:
+        peak_density = 0.0
+    
+    # 8. RHYTHM SCORE
+    if len(total_g) > 20:
+        rhythm_score = np.corrcoef(total_g[:-10], total_g[10:])[0, 1]
+        rhythm_score = max(0, rhythm_score) if not np.isnan(rhythm_score) else 0.0
+    else:
+        rhythm_score = 0.0
+    
+    # === VIBRATION FEATURES ===
+    lateral_vibration = np.std(lateral)
+    vertical_vibration = np.std(vertical)
+    longitudinal_vibration = np.std(longitudinal)
+    
+    return {
+        # Basic features
+        'num_positive_g_peaks': num_positive_g,
+        'max_negative_vertical_g': max_neg_vert,
+        'max_positive_vertical_g': max_pos_vert,
+        'max_lateral_g': max_lateral,
+        'max_longitudinal_g': max_longitudinal,
+        
+        # Smoothness
+        'vertical_variance': vert_variance,
+        'lateral_variance': lat_variance,
+        'vertical_jerk': vert_jerk,
+        'avg_total_g': avg_total_g,
+        
+        # Advanced
+        'airtime_gforce_interaction': airtime_gforce_interaction,
+        'g_force_range': g_force_range,
+        'lateral_jerk': lateral_jerk,
+        'g_force_skewness': g_skewness,
+        'intensity_pacing': intensity_pacing,
+        'force_transitions': g_transitions,
+        'peak_density': peak_density,
+        'rhythm_score': rhythm_score,
+        
+        # Vibration
+        'lateral_vibration': lateral_vibration,
+        'vertical_vibration': vertical_vibration,
+        'longitudinal_vibration': longitudinal_vibration,
     }
 
 # Auto-generate preview when blocks are added
@@ -1430,6 +1550,10 @@ if st.session_state.track_generated:
             # Compute airtime metrics and store
             airtime = compute_airtime_metrics(accel_df)
             st.session_state.airtime_metrics = airtime
+            
+            # Calculate comprehensive ride features
+            ride_features = calculate_ride_features(accel_df)
+            st.session_state.ride_features = ride_features
             
             # Predict rating automatically
             with st.spinner('🤖 AI analyzing your design...'):
@@ -1744,14 +1868,15 @@ if st.session_state.track_generated:
             else:
                 distance = x_track
             
-            # Floater: between -0.25 and 0.25
-            flo_mask = (g >= -0.25) & (g <= 0.25)
+            # Updated definitions to match notebook:
+            # Floater: -0.5g <= Vertical < 0.0g
+            flo_mask = (g < 0.0) & (g >= -0.5)
             
-            # Flojector: between -0.75 and -0.25, OR between 0.25 and 0.75
-            flj_mask = ((g >= -0.75) & (g < -0.25)) | ((g > 0.25) & (g <= 0.75))
+            # Flojector: -1.0g <= Vertical < -0.5g
+            flj_mask = (g < -0.5) & (g >= -1.0)
             
-            # Ejector: higher than 0.75 or lower than -0.75
-            ej_mask = (g < -0.75) | (g > 0.75)
+            # Ejector: Vertical < -1.0g (extreme airtime)
+            ej_mask = (g < -1.0)
 
             def mask_to_intervals(mask, position_array):
                 intervals = []
@@ -1882,6 +2007,70 @@ if st.session_state.track_generated:
                 )
                 st.caption("Total")
         
+        # Hidden panel with comprehensive features
+        with st.expander("🔬 Advanced Ride Features", expanded=False):
+            ride_features = st.session_state.get('ride_features')
+            if ride_features:
+                st.markdown("**📊 Comprehensive Ride Analysis**")
+                
+                # Basic Features
+                st.markdown("**🎯 Basic Features**")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Positive G Peaks (>3g)", f"{ride_features.get('num_positive_g_peaks', 0):.0f}")
+                with col2:
+                    st.metric("Max Negative G", f"{ride_features.get('max_negative_vertical_g', 0):.2f}g")
+                with col3:
+                    st.metric("Max Positive G", f"{ride_features.get('max_positive_vertical_g', 0):.2f}g")
+                with col4:
+                    st.metric("Max Lateral G", f"{ride_features.get('max_lateral_g', 0):.2f}g")
+                
+                # Smoothness Features
+                st.markdown("**🌊 Smoothness & Rhythm**")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Vertical Variance", f"{ride_features.get('vertical_variance', 0):.3f}")
+                with col2:
+                    st.metric("Vertical Jerk", f"{ride_features.get('vertical_jerk', 0):.3f}")
+                with col3:
+                    st.metric("Avg Total G", f"{ride_features.get('avg_total_g', 0):.2f}g")
+                with col4:
+                    st.metric("Rhythm Score", f"{ride_features.get('rhythm_score', 0):.3f}")
+                
+                # Advanced Features
+                st.markdown("**⚡ Advanced Dynamics**")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Airtime×G-Force", f"{ride_features.get('airtime_gforce_interaction', 0):.2f}")
+                with col2:
+                    st.metric("G-Force Range", f"{ride_features.get('g_force_range', 0):.2f}g")
+                with col3:
+                    st.metric("Lateral Jerk", f"{ride_features.get('lateral_jerk', 0):.3f}")
+                with col4:
+                    st.metric("G-Force Skewness", f"{ride_features.get('g_force_skewness', 0):.2f}")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Intensity Pacing", f"{ride_features.get('intensity_pacing', 0):.2f}")
+                with col2:
+                    st.metric("Force Transitions", f"{ride_features.get('force_transitions', 0):.3f}")
+                with col3:
+                    st.metric("Peak Density", f"{ride_features.get('peak_density', 0):.1f}")
+                with col4:
+                    st.metric("Max Longitudinal G", f"{ride_features.get('max_longitudinal_g', 0):.2f}g")
+                
+                # Vibration Features
+                st.markdown("**📳 Vibration Analysis**")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Lateral Vibration", f"{ride_features.get('lateral_vibration', 0):.3f}")
+                with col2:
+                    st.metric("Vertical Vibration", f"{ride_features.get('vertical_vibration', 0):.3f}")
+                with col3:
+                    st.metric("Longitudinal Vibration", f"{ride_features.get('longitudinal_vibration', 0):.3f}")
+            else:
+                st.info("Generate a track and run physics simulation to see advanced features.")
+        
         if max_angle_after_lift > 30:
             st.caption("⚠️ Track has steep sections (>30°) - smoothing applied")
         else:
@@ -1968,9 +2157,14 @@ if st.session_state.track_generated:
             # Use the same vertical g column as other plots: 'Vertical'
             df = st.session_state.accel_df
             vert_g = df['Vertical'].values if 'Vertical' in df.columns else None
-            # Scale factor for arrow length per 1g
-            # Increased to make 1g clearly visible (10 meters per 1g)
-            arrow_scale = 10.0
+            # Smooth vertical g to reduce jitter in arrows
+            if vert_g is not None:
+                from scipy.ndimage import gaussian_filter1d
+                vert_g_smooth = gaussian_filter1d(vert_g, sigma=2.0, mode='nearest')
+            else:
+                vert_g_smooth = None
+            # Scale factor for arrow length per 1g (smaller to reduce size)
+            arrow_scale = 5.0
             # Downsample frames if very long to keep UI responsive
             max_frames = 900
             if len(xp) > max_frames:
@@ -1983,9 +2177,10 @@ if st.session_state.track_generated:
                 nxi, nyi = nx[i], ny[i]
                 # Acceleration vector along normal using vertical g if available
                 # Flip sign for visualization: positive G (downward force) points down
-                if vert_g is not None and i < len(vert_g):
-                    axv = -arrow_scale * vert_g[i] * nxi  # Negative sign so 1g points down
-                    ayv = -arrow_scale * vert_g[i] * nyi  # Negative sign so 1g points down
+                if vert_g_smooth is not None and i < len(vert_g_smooth):
+                    g_val = vert_g_smooth[i]
+                    axv = -arrow_scale * g_val * nxi  # Negative sign so 1g points down
+                    ayv = -arrow_scale * g_val * nyi  # Negative sign so 1g points down
                     accel_trace = go.Scatter(x=[xp[i], xp[i] + axv], y=[yp[i], yp[i] + ayv], mode='lines',
                                              line=dict(color='#2ca02c', width=3), name='Acceleration')
                 else:
@@ -2047,18 +2242,40 @@ if st.session_state.track_generated:
     if 'accel_df' in st.session_state:
         accel_df = st.session_state.accel_df
         
+        # Build distance axis to plot G-forces over track distance (arc length), not time
+        if (
+            'track_x' in st.session_state and
+            'track_y' in st.session_state and
+            'track_z' in st.session_state and
+            len(st.session_state.track_x) > 1
+        ):
+            x_track = np.array(st.session_state.track_x, dtype=float)
+            y_track = np.array(st.session_state.track_y, dtype=float)
+            z_track = np.array(st.session_state.track_z, dtype=float)
+            # Compute cumulative distance along the 3D track
+            dx = np.diff(x_track, prepend=x_track[0])
+            dy = np.diff(y_track, prepend=y_track[0])
+            dz = np.diff(z_track, prepend=z_track[0])
+            distance_raw = np.cumsum(np.sqrt(dx**2 + dy**2 + dz**2))
+            # Interpolate to match acceleration dataframe length if needed
+            if len(distance_raw) != len(accel_df):
+                distance_axis = np.linspace(0, distance_raw[-1], len(accel_df))
+            else:
+                distance_axis = distance_raw
+        else:
+            # Fallback: use index as distance surrogate
+            distance_axis = np.linspace(0, len(accel_df), len(accel_df))
+        
         # Create subplots for each G-force
         fig_g = make_subplots(
             rows=3, cols=1,
             subplot_titles=("Vertical G-Forces", "Lateral G-Forces", "Longitudinal G-Forces"),
             vertical_spacing=0.12
         )
-        
-        time_max = accel_df['Time'].max()
-        
+
         # Vertical G-forces with safety zones
         fig_g.add_trace(
-            go.Scatter(x=accel_df['Time'], y=accel_df['Vertical'],
+            go.Scatter(x=distance_axis, y=accel_df['Vertical'],
                       name='Vertical', line=dict(color='red', width=2)),
             row=1, col=1
         )
@@ -2078,7 +2295,7 @@ if st.session_state.track_generated:
         
         # Lateral G-forces with safety zones
         fig_g.add_trace(
-            go.Scatter(x=accel_df['Time'], y=accel_df['Lateral'],
+            go.Scatter(x=distance_axis, y=accel_df['Lateral'],
                       name='Lateral', line=dict(color='blue', width=2)),
             row=2, col=1
         )
@@ -2095,7 +2312,7 @@ if st.session_state.track_generated:
         
         # Longitudinal G-forces
         fig_g.add_trace(
-            go.Scatter(x=accel_df['Time'], y=accel_df['Longitudinal'],
+            go.Scatter(x=distance_axis, y=accel_df['Longitudinal'],
                       name='Longitudinal', line=dict(color='green', width=2)),
             row=3, col=1
         )
@@ -2135,7 +2352,9 @@ if st.session_state.track_generated:
         fig_g.update_yaxes(range=y_range_lateral, row=2, col=1)
         fig_g.update_yaxes(range=y_range_longitudinal, row=3, col=1)
         
-        fig_g.update_xaxes(title_text="Time (s)", row=3, col=1)
+        # Set x-axis titles to distance for all subplots
+        for i in range(1, 4):
+            fig_g.update_xaxes(title_text="Distance (m)", row=i, col=1)
         fig_g.update_yaxes(title_text="G", row=2, col=1)
         
         fig_g.update_layout(
