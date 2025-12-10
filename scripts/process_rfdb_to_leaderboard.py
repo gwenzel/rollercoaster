@@ -323,5 +323,12 @@ def process_rfdb_tracks(max_rfdb_submissions=100):
 
 
 if __name__ == "__main__":
-    process_rfdb_tracks()
+    import sys
+    max_submissions = 300  # Default to 300
+    if len(sys.argv) > 1:
+        try:
+            max_submissions = int(sys.argv[1])
+        except ValueError:
+            print(f"Invalid argument: {sys.argv[1]}. Using default: {max_submissions}")
+    process_rfdb_tracks(max_rfdb_submissions=max_submissions)
 
