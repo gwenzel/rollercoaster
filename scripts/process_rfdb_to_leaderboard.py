@@ -16,17 +16,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.cloud_data_loader import list_rfdb_parks, list_rfdb_coasters, list_rfdb_csvs, load_rfdb_csv
 from utils.submission_manager import add_submission_to_leaderboard, update_submission_in_leaderboard, load_submissions
 from app_builder import check_gforce_safety, compute_airtime_metrics
+from utils.lgbm_predictor import predict_score_lgb
 
 
-def estimate_fun_rating_from_accelerations(accel_df):
-    """
-    Estimate fun rating (0-5) from accelerometer data.
-    Uses heuristics based on:
-    - Airtime (negative g-forces)
-    - G-force variety/intensity
-    - Ride duration
-    - Smoothness
-    """
+def _heuristic_fun_rating(accel_df):
     if accel_df is None or len(accel_df) < 10:
         return 2.5  # Default middle rating
     
@@ -90,6 +83,18 @@ def estimate_fun_rating_from_accelerations(accel_df):
     score = max(0.0, min(5.0, score))
     
     return score
+
+
+def estimate_fun_rating_from_accelerations(accel_df):
+    """
+    Estimate fun rating using the LightGBM extreme model.
+    Falls back to the heuristic scorer if the model is unavailable.
+    """
+    try:
+        return predict_score_lgb(accel_df)
+    except Exception as e:
+        print(f"[fallback] LightGBM prediction failed: {e}")
+        return _heuristic_fun_rating(accel_df)
 
 
 def process_rfdb_tracks(max_rfdb_submissions=100):

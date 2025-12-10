@@ -289,7 +289,7 @@ def compute_rider_accelerations(track_df):
 
 def track_to_accelerometer_data(track_df, mass=1200.0, rho=1.0, Cd=0.08, A=2.5, mu=0.001):
     """
-    Convert track coordinates to accelerometer readings for BiGRU model.
+    Convert track coordinates to accelerometer readings for LightGBM model.
     
     This is the main function to use for Streamlit integration.
     Uses the realistic physics engine (with friction/drag) as default,

@@ -15,7 +15,7 @@ import os
 
 # Import utilities
 from utils.accelerometer_transform import track_to_accelerometer_data
-from utils.bigru_predictor import predict_score_bigru
+from utils.lgbm_predictor import predict_score_lgb, compute_lightgbm_features
 from utils.track_library import ensure_library, pick_random_entry, load_entry, add_entry
 from utils.track_blocks import (
     lift_hill_profile,
@@ -1335,14 +1335,10 @@ def compute_airtime_metrics(accel_df):
     else:
         dt = float(np.median(np.diff(t)))
 
-    # Notebook definition: floater < 0.0 and >= -0.5
-    floater_mask = (g < 0.25) & (g >= -0.25)
-    
-    # Notebook definition: flojector < -0.5 and >= -1.0
-    flojector_mask = (g < -0.25) & (g >= -0.75)
-    
-    # Ejector: < -1.0g (extreme airtime)
-    ejector_mask = (g < -0.75)
+    # Notebook definitions
+    floater_mask = (g < 0.0) & (g >= -0.5)
+    flojector_mask = (g < -0.5) & (g >= -1.0)
+    ejector_mask = (g < -1.0)
 
     floater_time = float(floater_mask.sum() * dt)
     flojector_time = float(flojector_mask.sum() * dt)
@@ -1361,119 +1357,51 @@ def compute_airtime_metrics(accel_df):
     }
 
 def calculate_ride_features(accel_df):
-    """Calculate comprehensive ride features inspired by notebook.
-    Returns a dictionary with all calculated features.
-    """
+    """Calculate features consistent with the LightGBM extreme model."""
     if accel_df is None or len(accel_df) == 0:
         return {}
-    
     if not all(col in accel_df.columns for col in ['Vertical', 'Lateral', 'Longitudinal']):
         return {}
-    
-    # Extract forces
-    vertical = accel_df['Vertical'].values
-    lateral = accel_df['Lateral'].values
-    longitudinal = accel_df['Longitudinal'].values
-    
-    # Calculate total g-force magnitude
-    total_g = np.sqrt(vertical**2 + lateral**2 + longitudinal**2)
-    
-    # === BASIC FEATURES ===
-    num_positive_g = np.sum(vertical > 3.0)
-    max_neg_vert = np.min(vertical) if len(vertical) > 0 else 0.0
-    max_pos_vert = np.max(vertical) if len(vertical) > 0 else 0.0
-    max_lateral = np.max(np.abs(lateral)) if len(lateral) > 0 else 0.0
-    max_longitudinal = np.max(np.abs(longitudinal)) if len(longitudinal) > 0 else 0.0
-    
-    # === SMOOTHNESS/RHYTHM ===
-    vert_variance = np.var(vertical) if len(vertical) > 0 else 0.0
-    lat_variance = np.var(lateral) if len(lateral) > 0 else 0.0
-    vert_jerk = np.mean(np.abs(np.diff(vertical))) if len(vertical) > 1 else 0.0
-    avg_total_g = np.mean(total_g) if len(total_g) > 0 else 0.0
-    
-    # === ADVANCED FEATURES ===
-    
-    # 1. AIRTIME x G-FORCE INTERACTION
-    airtime_ratio = np.sum(vertical < 0) / len(vertical) if len(vertical) > 0 else 0.0
-    positive_g_ratio = np.sum(vertical > 2.0) / len(vertical) if len(vertical) > 0 else 0.0
-    airtime_gforce_interaction = airtime_ratio * positive_g_ratio * 10.0
-    
-    # 2. G-FORCE RANGE
-    g_force_range = (max_pos_vert - max_neg_vert) if (max_pos_vert > 0 or max_neg_vert < 0) else 0.0
-    
-    # 3. LATERAL JERK
-    lateral_jerk = np.mean(np.abs(np.diff(lateral))) if len(lateral) > 1 else 0.0
-    
-    # 4. G-FORCE SKEWNESS
-    try:
-        g_skewness = stats.skew(vertical) if len(vertical) > 3 else 0.0
-    except:
-        g_skewness = 0.0
-    
-    # 5. INTENSITY PACING
-    mid_point = len(total_g) // 2
-    if mid_point > 0:
-        first_half_intensity = np.mean(total_g[:mid_point])
-        second_half_intensity = np.mean(total_g[mid_point:])
-        intensity_pacing = first_half_intensity / (second_half_intensity + 0.1)
-    else:
-        intensity_pacing = 1.0
-    
-    # 6. FORCE TRANSITIONS
-    if len(total_g) > 1:
-        g_transitions = np.std(np.diff(total_g))
-    else:
-        g_transitions = 0.0
-    
-    # 7. PEAK DENSITY
-    high_g_threshold = np.percentile(total_g, 90) if len(total_g) > 10 else 3.0
-    high_g_moments = total_g > high_g_threshold
-    if np.sum(high_g_moments) > 0:
-        peak_density = np.sum(high_g_moments) / (len(total_g) / 100.0)
-    else:
-        peak_density = 0.0
-    
-    # 8. RHYTHM SCORE
-    if len(total_g) > 20:
-        rhythm_score = np.corrcoef(total_g[:-10], total_g[10:])[0, 1]
-        rhythm_score = max(0, rhythm_score) if not np.isnan(rhythm_score) else 0.0
-    else:
-        rhythm_score = 0.0
-    
-    # === VIBRATION FEATURES ===
-    lateral_vibration = np.std(lateral)
-    vertical_vibration = np.std(vertical)
-    longitudinal_vibration = np.std(longitudinal)
-    
-    return {
-        # Basic features
-        'num_positive_g_peaks': num_positive_g,
-        'max_negative_vertical_g': max_neg_vert,
-        'max_positive_vertical_g': max_pos_vert,
-        'max_lateral_g': max_lateral,
-        'max_longitudinal_g': max_longitudinal,
-        
-        # Smoothness
-        'vertical_variance': vert_variance,
-        'lateral_variance': lat_variance,
-        'vertical_jerk': vert_jerk,
-        'avg_total_g': avg_total_g,
-        
-        # Advanced
-        'airtime_gforce_interaction': airtime_gforce_interaction,
-        'g_force_range': g_force_range,
-        'lateral_jerk': lateral_jerk,
-        'g_force_skewness': g_skewness,
-        'intensity_pacing': intensity_pacing,
-        'force_transitions': g_transitions,
-        'peak_density': peak_density,
-        'rhythm_score': rhythm_score,
-        
-        # Vibration
-        'lateral_vibration': lateral_vibration,
-        'vertical_vibration': vertical_vibration,
-        'longitudinal_vibration': longitudinal_vibration,
+
+    feature_vector, feature_map = compute_lightgbm_features(accel_df, return_dict=True)
+
+    # Backward-compatible keys for the advanced panel
+    alias = {
+        'num_positive_g_peaks': "Num Positive G (>3.0g)",
+        'max_negative_vertical_g': "Max Negative Vertical G",
+        'max_positive_vertical_g': "Max Positive Vertical G",
+        'max_lateral_g': "Max Lateral G",
+        'max_longitudinal_g': "Max Longitudinal G",
+        'vertical_variance': "Vertical Variance",
+        'lateral_variance': "Lateral Variance",
+        'vertical_jerk': "Vertical Jerk",
+        'avg_total_g': "Avg Total G",
+        'airtime_gforce_interaction': "Airtime×G-Force Interaction",
+        'g_force_range': "G-Force Range",
+        'lateral_jerk': "Lateral Jerk",
+        'g_force_skewness': "G-Force Skewness",
+        'intensity_pacing': "Intensity Pacing",
+        'force_transitions': "Force Transitions",
+        'peak_density': "Peak Density",
+        'rhythm_score': "Rhythm Score",
+        'lateral_vibration': "Lateral Vibration",
+        'vertical_vibration': "Vertical Vibration",
+        'longitudinal_vibration': "Longitudinal Vibration",
     }
+
+    ride_features = {k: float(feature_map.get(v, 0.0)) for k, v in alias.items()}
+    # Include airtime + metadata pieces for completeness
+    ride_features.update({
+        'total_length_log_sec': float(feature_map.get("Total Length (log-sec)", 0.0)),
+        'floater_airtime_pct': float(feature_map.get("Floater Airtime %", 0.0)),
+        'flojector_airtime_pct': float(feature_map.get("Flojector Airtime %", 0.0)),
+        'height_m': float(feature_map.get("Height (m)", 0.0)),
+        'speed_kmh': float(feature_map.get("Speed (km/h)", 0.0)),
+        'track_length_m': float(feature_map.get("Track Length (m)", 0.0)),
+        'feature_vector': feature_vector,
+    })
+
+    return ride_features
 
 # Auto-generate preview when blocks are added
 if len(st.session_state.track_sequence) > 0:
@@ -1567,9 +1495,37 @@ if st.session_state.track_generated:
             ride_features = calculate_ride_features(accel_df)
             st.session_state.ride_features = ride_features
             
+            # Compute metadata from track geometry for better predictions
+            x_track = np.array(st.session_state.track_x)
+            y_track = np.array(st.session_state.track_y)
+            z_track = np.array(st.session_state.get('track_z', np.zeros_like(x_track)))
+            
+            # Track length: 3D arc length
+            dx = np.diff(x_track, prepend=x_track[0])
+            dy = np.diff(y_track, prepend=y_track[0])
+            dz = np.diff(z_track, prepend=z_track[0])
+            track_length_m = float(np.sum(np.sqrt(dx**2 + dy**2 + dz**2)))
+            
+            # Max height
+            height_m = float(np.max(y_track))
+            
+            # Max speed: estimate from energy conservation (v = sqrt(2*g*h))
+            # Use max height drop as proxy for max speed
+            max_height_drop = float(np.max(y_track) - np.min(y_track))
+            g = 9.81
+            energy_efficiency = 0.95  # Match accelerometer_transform
+            max_speed_ms = np.sqrt(2 * g * max_height_drop * energy_efficiency)
+            speed_kmh = float(max_speed_ms * 3.6)  # Convert to km/h
+            
+            metadata = {
+                'height_m': height_m,
+                'speed_kmh': speed_kmh,
+                'track_length_m': track_length_m
+            }
+            
             # Predict rating automatically
             with st.spinner('🤖 AI analyzing your design...'):
-                predicted_rating = predict_score_bigru(track_df)
+                predicted_rating = predict_score_lgb(accel_df, metadata=metadata)
                 st.session_state.predicted_rating = predicted_rating
             
             # Compact rating display with scores and airtime in one row
@@ -2628,7 +2584,7 @@ else:
 st.divider()
 st.markdown("""
 <div style="text-align: center; color: gray; font-size: 0.9rem;">
-    🎢 Powered by BiGRU Neural Network trained on 359 real roller coasters<br>
+    🎢 Powered by LightGBM Extreme Features model (26 engineered features)<br>
     Using accelerometer data from RideForcesDB and ratings from Captain Coaster
 </div>
 """, unsafe_allow_html=True)
