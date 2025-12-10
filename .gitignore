@@ -10,6 +10,7 @@ __pycache__/
 *.xlsx
 !accel_data/*
 !rfdb_csvs/*
+!submissions/*
 
 # Images
 *.png
