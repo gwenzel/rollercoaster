@@ -604,6 +604,10 @@ with st.sidebar:
             'params': params.copy()
         })
         st.session_state.track_generated = False
+        # Clear cached physics so plots recompute after adding a block
+        st.session_state.pop('accel_df', None)
+        st.session_state.pop('airtime_metrics', None)
+        st.session_state.pop('ride_features', None)
         st.success(f"✅ Added {selected_block.name}")
         st.rerun()
     
@@ -671,6 +675,10 @@ with st.sidebar:
                     if st.button("🗑️ Remove", key=f"del_{idx}", use_container_width=True):
                         st.session_state.track_sequence.pop(idx)
                         st.session_state.track_generated = False
+                        # Clear cached physics so plots recompute
+                        st.session_state.pop('accel_df', None)
+                        st.session_state.pop('airtime_metrics', None)
+                        st.session_state.pop('ride_features', None)
                         st.rerun()
                 with col_up:
                     if idx > 0 and st.button("⬆️ Move Up", key=f"up_{idx}", use_container_width=True):
@@ -691,6 +699,10 @@ with st.sidebar:
         if st.button("🗑️ Clear All Blocks", use_container_width=True):
             st.session_state.track_sequence = []
             st.session_state.track_generated = False
+            # Clear cached physics so plots recompute
+            st.session_state.pop('accel_df', None)
+            st.session_state.pop('airtime_metrics', None)
+            st.session_state.pop('ride_features', None)
             st.rerun()
 
 # ============================================================================
