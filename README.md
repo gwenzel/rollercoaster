@@ -57,6 +57,8 @@ Open your browser to `http://localhost:8501`
 - **➡️ Flat Section**: Straight section
 - **🛑 Brake Run**: Final braking section
 
+For detailed parametric design documentation, including parameter ranges, geometric properties, and design recommendations, see [Track Blocks Parametric Design](docs/TRACK_BLOCKS_PARAMETRIC_DESIGN.md).
+
 ## 🤖 Machine Learning Model
 
 The rating prediction uses a **LightGBM gradient boosting model** trained on:
@@ -147,6 +149,7 @@ See `requirements.txt` for the complete list.
 
 ## 📚 Documentation
 
+- **Track Blocks Design**: See [Track Blocks Parametric Design](docs/TRACK_BLOCKS_PARAMETRIC_DESIGN.md) for detailed documentation of all building blocks, parameters, and design guidelines
 - **Demo Description**: See `docs/DEMO_DESCRIPTION.md` for a detailed technical overview
 - **Deployment Guide**: See `docs/DEPLOYMENT_GUIDE.md` for deployment instructions
 - **RFDB Data**: See `docs/RFDB_MAPPING_COMPLETE.md` for data source information
