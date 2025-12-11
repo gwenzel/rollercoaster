@@ -1,0 +1,40 @@
+
+ROLLER COASTER DATASET ANALYSIS REPORT
+============================================================
+
+Dataset: complete_coaster_mapping.csv
+Date: 2025-12-03 22:30:49
+
+DATASET OVERVIEW
+------------------------------------------------------------
+Total entries:        1,299
+Unique coasters:      1,050
+Duplicate entries:    249
+Number of columns:    37
+
+RATING STATISTICS
+------------------------------------------------------------
+Mean rating:          2.7611
+Median rating:        2.7300
+Standard deviation:   1.0143
+Minimum rating:       0.5000
+Maximum rating:       4.9000
+Rating range:         4.4000
+
+RATING DISTRIBUTION
+------------------------------------------------------------
+Excellent (4.5-5.0)      :   63 (  4.8%)
+Very Good (4.0-4.5)      :  120 (  9.2%)
+Good (3.5-4.0)           :  167 ( 12.9%)
+Average (3.0-3.5)        :  189 ( 14.5%)
+Below Average (<3.0)     :  759 ( 58.4%)
+
+MATCH TYPE DISTRIBUTION
+------------------------------------------------------------
+fuzzy          :  781 ( 60.1%) | Avg Rating: 2.559
+perfect        :  518 ( 39.9%) | Avg Rating: 3.066
+
+============================================================
+Report generated successfully
+Figures saved to: c:\Users\Lenovo\rollercoaster\ratings_data\report_figures
+============================================================

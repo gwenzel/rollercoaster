@@ -14,6 +14,7 @@ The transformation accounts for:
 
 import numpy as np
 import pandas as pd
+from utils.acceleration import compute_acc_profile
 
 
 def compute_track_derivatives(track_df):
@@ -40,11 +41,19 @@ def compute_track_derivatives(track_df):
     ds = np.sqrt(dx**2 + dy**2 + dz**2)
     s = np.cumsum(ds)
     
-    # Compute velocity using energy conservation
-    # v = sqrt(2*g*(h_max - h))
+    # Compute velocity using pure energy conservation
+    # Speed is determined by height changes and initial energy
+    # No hardcoded lift mechanics - use launch/booster blocks for initial speed
     g = 9.81
-    h_max = y.max()
-    v = np.sqrt(2 * g * np.maximum(0, h_max - y))
+    h_initial = y[0]  # Starting height
+    
+    # Energy conservation: (1/2)mv² = (1/2)mv0² + mg(h_initial - h)
+    # Solving for v: v² = v0² + 2g(h_initial - h)
+    # Start from rest (v0 = 0) - use launch blocks to add initial energy
+    v0 = 0.0  # Start from rest
+    energy_efficiency = 0.95  # 95% efficiency (minimal friction for modern coasters)
+    
+    v = np.sqrt(np.maximum(0, v0**2 + 2 * g * (h_initial - y) * energy_efficiency))
     
     # Add small minimum velocity to avoid division by zero
     v = np.maximum(v, 0.1)
@@ -114,12 +123,22 @@ def compute_rider_accelerations(track_df):
     
     # Compute curvature and centripetal acceleration
     # Curvature κ = |dT/ds| where T is the unit tangent
-    dt_x = np.gradient(tangent_x)
-    dt_y = np.gradient(tangent_y)
-    dt_z = np.gradient(tangent_z)
+    # Apply smoothing to reduce noise spikes at block joints
+    from scipy.ndimage import gaussian_filter1d
+    
+    tangent_x_smooth = gaussian_filter1d(tangent_x, sigma=1.5, mode='nearest')
+    tangent_y_smooth = gaussian_filter1d(tangent_y, sigma=1.5, mode='nearest')
+    tangent_z_smooth = gaussian_filter1d(tangent_z, sigma=1.5, mode='nearest')
+    
+    dt_x = np.gradient(tangent_x_smooth)
+    dt_y = np.gradient(tangent_y_smooth)
+    dt_z = np.gradient(tangent_z_smooth)
     
     curvature = np.sqrt(dt_x**2 + dt_y**2 + dt_z**2)
     curvature = np.maximum(curvature, 1e-10)
+    
+    # Smooth the curvature itself to eliminate remaining spikes
+    curvature = gaussian_filter1d(curvature, sigma=1.0, mode='nearest')
     
     # Centripetal acceleration magnitude
     a_centripetal = v**2 * curvature
@@ -130,11 +149,23 @@ def compute_rider_accelerations(track_df):
     normal_y = dt_y / curvature
     normal_z = dt_z / curvature
     
+    # Smooth normal vectors to reduce discontinuities
+    normal_x = gaussian_filter1d(normal_x, sigma=1.0, mode='nearest')
+    normal_y = gaussian_filter1d(normal_y, sigma=1.0, mode='nearest')
+    normal_z = gaussian_filter1d(normal_z, sigma=1.0, mode='nearest')
+    
+    # Re-normalize after smoothing
+    normal_mag = np.sqrt(normal_x**2 + normal_y**2 + normal_z**2)
+    normal_mag = np.maximum(normal_mag, 1e-10)
+    normal_x /= normal_mag
+    normal_y /= normal_mag
+    normal_z /= normal_mag
+    
     # Binormal vector (perpendicular to both tangent and normal)
-    # B = T × N
-    binormal_x = tangent_y * normal_z - tangent_z * normal_y
-    binormal_y = tangent_z * normal_x - tangent_x * normal_z
-    binormal_z = tangent_x * normal_y - tangent_y * normal_x
+    # B = T × N (use smoothed tangents)
+    binormal_x = tangent_y_smooth * normal_z - tangent_z_smooth * normal_y
+    binormal_y = tangent_z_smooth * normal_x - tangent_x_smooth * normal_z
+    binormal_z = tangent_x_smooth * normal_y - tangent_y_smooth * normal_x
     
     # Normalize binormal
     binormal_mag = np.sqrt(binormal_x**2 + binormal_y**2 + binormal_z**2)
@@ -144,43 +175,99 @@ def compute_rider_accelerations(track_df):
     binormal_y /= binormal_mag
     binormal_z /= binormal_mag
     
-    # Gravity vector (in world frame)
-    gravity = np.array([0, -g, 0])
+    # Transform to Z-up coordinate system (matching app_builder and compute_acc_profile)
+    # Original coordinates: x=forward, y=vertical, z=lateral
+    # Z-up coordinates: x=forward, y=lateral, z=vertical
+    # Transformation: (x, y, z) -> (x, z, y)
     
-    # Total acceleration in world frame
-    # a_total = a_tangential * T + a_centripetal * N + gravity
-    a_world_x = a_tangential * tangent_x + a_centripetal * normal_x + gravity[0]
-    a_world_y = a_tangential * tangent_y + a_centripetal * normal_y + gravity[1]
-    a_world_z = a_tangential * tangent_z + a_centripetal * normal_z + gravity[2]
+    # Transform tangent vectors to Z-up
+    tangent_x_up = tangent_x  # Forward stays same
+    tangent_y_up = tangent_z  # Lateral (old z) becomes y
+    tangent_z_up = tangent_y  # Vertical (old y) becomes z
     
-    # Transform to rider's reference frame
-    # Longitudinal = projection onto tangent (forward direction)
-    a_longitudinal = (a_world_x * tangent_x + 
-                     a_world_y * tangent_y + 
-                     a_world_z * tangent_z)
+    # Transform normal vectors to Z-up
+    normal_x_up = normal_x
+    normal_y_up = normal_z
+    normal_z_up = normal_y
     
-    # Lateral = projection onto binormal (side direction)
-    a_lateral = (a_world_x * binormal_x + 
-                a_world_y * binormal_y + 
-                a_world_z * binormal_z)
+    # Transform binormal vectors to Z-up
+    # Original: binormal = [bx, by, bz] where by is lateral (Y in original = lateral)
+    # Z-up: we want binormal to point in Y direction (lateral in Z-up)
+    # Transformation: (x, y, z) -> (x, z, y)
+    # So: binormal_up = [bx, bz, by]
+    # But wait - in original coords, for 2D track:
+    #   - binormal points in Y direction (lateral) = [0, by, 0]
+    #   - After transform: [0, 0, by] which is Z direction (wrong!)
+    # We need binormal to point in Y direction (lateral) in Z-up coords
+    # So: binormal_up = [bx, by, bz] where by (original lateral) becomes Y (Z-up lateral)
+    # Actually, the correct transformation is:
+    #   Original binormal [bx, by, bz] -> Z-up [bx, bz, by]
+    #   But for 2D track, binormal = [0, by, 0], so we get [0, 0, by] which is wrong
+    # The issue is that binormal in original coords points in Y (lateral)
+    # In Z-up coords, lateral is Y, so binormal should be [0, by, 0] in Z-up
+    # So we need: binormal_up = [bx, by, bz] (no swap, because by is already lateral)
+    # Wait, let me think again...
+    # Original: (x, y, z) = (forward, vertical, lateral)
+    # Z-up: (x, y, z) = (forward, lateral, vertical)
+    # Binormal in original: points in Y direction (which is vertical in original, but lateral in Z-up? No!)
+    # Actually, in original coords, Y is vertical, Z is lateral
+    # Binormal = T × N, where T and N are in XZ plane (forward-vertical plane)
+    # So binormal points in Y direction (perpendicular to XZ plane)
+    # But Y in original is vertical, not lateral!
+    # For a 2D track in XZ plane, binormal should point in the direction perpendicular to the plane
+    # In original coords, that's Y (vertical direction)
+    # But we want lateral, which is Z in original coords
+    # So the binormal calculation is wrong for 2D tracks!
+    # Actually, for a 2D track in the XZ plane:
+    #   - T = [tx, ty, tz] but ty=0 (no vertical component in original? No, ty is vertical!)
+    #   - For track in XZ plane: T = [tx, 0, tz] where tx is forward, tz is... wait
+    # Let me reconsider: track is in XY plane (forward-vertical), so Z is lateral
+    # T = [tx, ty, 0] where tx is forward, ty is vertical
+    # N is also in XY plane
+    # Binormal = T × N = [0, 0, something] which points in Z direction (lateral) - correct!
+    # After transform to Z-up: (x, y, z) -> (x, z, y)
+    # Binormal [0, 0, bz] -> [0, bz, 0] which is Y direction (lateral) in Z-up - correct!
+    # So the transformation should be: [bx, by, bz] -> [bx, bz, by]
+    binormal_x_up = binormal_x
+    binormal_y_up = binormal_z  # Original Z (lateral) becomes Y (lateral in Z-up)
+    binormal_z_up = binormal_y  # Original Y (vertical) becomes Z (vertical in Z-up)
     
-    # Vertical = projection onto normal (perpendicular to track)
-    a_vertical = (a_world_x * normal_x + 
-                 a_world_y * normal_y + 
-                 a_world_z * normal_z)
+    # Gravity vector in Z-up coordinate system (Z-down convention, matching compute_acc_profile)
+    gravity = np.array([0, 0, -g])
     
-    # Add gravity component in vertical direction
-    # The rider feels gravity as part of the vertical acceleration
-    gravity_vertical = -(gravity[0] * normal_x + 
-                        gravity[1] * normal_y + 
-                        gravity[2] * normal_z)
-    a_vertical += gravity_vertical
+    # Total acceleration in world frame (Z-up coordinates)
+    # a_total = a_tangential * T + a_centripetal * N
+    a_world = np.stack([
+        a_tangential * tangent_x_up + a_centripetal * normal_x_up,
+        a_tangential * tangent_y_up + a_centripetal * normal_y_up,
+        a_tangential * tangent_z_up + a_centripetal * normal_z_up
+    ], axis=1)
+
+    # Subtract gravity vector to get specific force (what the rider feels)
+    # This matches the advanced model convention (Z-up, Z-down gravity)
+    a_spec = a_world - gravity
+
+    # Project specific force onto rider axes (in Z-up coordinates)
+    # Use same lateral axis calculation as advanced model: cross(ez, tangent)
+    # This ensures consistency and correct handling of 2D tracks
+    tangent = np.stack([tangent_x_up, tangent_y_up, tangent_z_up], axis=1)
+    ez = np.array([0.0, 0.0, 1.0])  # Z-up unit vector
+    lat_vec = np.cross(ez, tangent)  # Lateral axis (same as advanced model)
+    lat_norm = np.linalg.norm(lat_vec, axis=1, keepdims=True)
+    lat_vec = lat_vec / np.where(lat_norm < 1e-9, 1.0, lat_norm)
     
+    normal = np.stack([normal_x_up, normal_y_up, normal_z_up], axis=1)
+
+    a_longitudinal = np.einsum('ij,ij->i', a_spec, tangent)
+    a_lateral = np.einsum('ij,ij->i', a_spec, lat_vec)  # Use cross(ez, tangent) like advanced model
+    # Vertical is the Z component of specific force (Z-up convention, matching compute_acc_profile)
+    a_vertical = a_spec[:, 2]
+
     # Normalize to g-forces (divide by 9.81)
     a_lateral_g = a_lateral / g
     a_vertical_g = a_vertical / g
     a_longitudinal_g = a_longitudinal / g
-    
+
     # Create output DataFrame matching wearable format
     result_df = pd.DataFrame({
         'Time': np.linspace(0, len(df) * 0.02, len(df)),  # Assume 50Hz sampling
@@ -200,11 +287,13 @@ def compute_rider_accelerations(track_df):
     return result_df
 
 
-def track_to_accelerometer_data(track_df):
+def track_to_accelerometer_data(track_df, mass=1200.0, rho=1.0, Cd=0.08, A=2.5, mu=0.001):
     """
-    Convert track coordinates to accelerometer readings for BiGRU model.
+    Convert track coordinates to accelerometer readings for LightGBM model.
     
     This is the main function to use for Streamlit integration.
+    Uses the realistic physics engine (with friction/drag) as default,
+    with fallback to energy conservation if it fails.
     
     Args:
         track_df: DataFrame with columns ['x', 'y'] from build_modular_track()
@@ -214,24 +303,83 @@ def track_to_accelerometer_data(track_df):
         matching the format of real wearable accelerometer data
     """
     try:
-        accel_df = compute_rider_accelerations(track_df)
+        # Prepare 3D points array for acceleration.py (expects Nx3 numpy array)
+        x = track_df['x'].values
+        y = track_df['y'].values
+        z = track_df.get('z', pd.Series(np.zeros_like(x))).values
         
-        # Ensure output is in correct format
-        accel_df = accel_df[['Time', 'Lateral', 'Vertical', 'Longitudinal']]
+        # Stack into Nx3 array with z-up convention (acceleration.py uses z as vertical)
+        # Our coordinates: x=forward, y=vertical, z=lateral
+        # acceleration.py expects: x=forward, y=lateral, z=vertical
+        # So we map: (x, y, z) -> (x, z, y)
+        points = np.column_stack([x, z, y])  # (forward, lateral, vertical)
+        
+        # Initial speed: let energy conservation handle it naturally
+        # Start at near-zero speed (3 m/s ~ walking pace at station)
+        # Energy will build from lift hill height automatically
+        v0 = 3.0  # m/s (station/lift start speed)
+        
+        # Compute acceleration profile using realistic physics
+        # Use provided physics parameters (or defaults)
+        acc_result = compute_acc_profile(
+            points,
+            dt=0.02,           # 50Hz sampling
+            mass=mass,         # Train mass (kg) - parameterized
+            rho=rho,           # Air density (kg/m³) - parameterized
+            Cd=Cd,             # Drag coefficient - parameterized
+            A=A,               # Frontal area (m²) - parameterized
+            mu=mu,             # Rolling friction - parameterized
+            v0=v0,             # Initial speed (m/s) - calculated above
+            use_energy_conservation=True  # Use energy-based speeds for reliability
+        )
+        
+        # Extract specific force in g-units (what accelerometer measures)
+        # acceleration.py returns f_long_g, f_lat_g, f_vert_g
+        n = len(x)
+        
+        # Clip extreme values to prevent physics simulation artifacts
+        # Set to ±10g to allow visibility of intense forces while filtering numerical spikes
+        lateral = np.clip(acc_result['f_lat_g'], -10.0, 10.0)
+        vertical = np.clip(acc_result['f_vert_g'], -10.0, 10.0)
+        longitudinal = np.clip(acc_result['f_long_g'], -10.0, 10.0)
+        
+        # Apply moderate Gaussian smoothing to reduce numerical oscillations
+        # Balances smoothness with peak force preservation for realistic coaster feel
+        from scipy.ndimage import gaussian_filter1d
+        sigma_smooth = 2.0  # Moderate smoothing (~100ms window at 50Hz)
+        # Similar to real accelerometer response time
+        lateral = gaussian_filter1d(lateral, sigma=sigma_smooth, mode='nearest')
+        vertical = gaussian_filter1d(vertical, sigma=sigma_smooth, mode='nearest')
+        longitudinal = gaussian_filter1d(longitudinal, sigma=sigma_smooth, mode='nearest')
+        
+        accel_df = pd.DataFrame({
+            'Time': np.linspace(0, n * 0.02, n),
+            'Lateral': lateral,          # Side-to-side
+            'Vertical': vertical,        # Up-down (includes gravity effect)
+            'Longitudinal': longitudinal # Forward-backward
+        })
         
         return accel_df
     
     except Exception as e:
-        print(f"Error in track_to_accelerometer_data: {e}")
+        print(f"Warning: Realistic physics failed ({e}), falling back to energy conservation...")
         
-        # Fallback: return simple approximation
-        n = len(track_df)
-        return pd.DataFrame({
-            'Time': np.linspace(0, n * 0.02, n),
-            'Lateral': np.zeros(n),
-            'Vertical': np.ones(n),  # 1g vertical (gravity)
-            'Longitudinal': np.zeros(n)
-        })
+        # Fallback to the original energy conservation method
+        try:
+            accel_df = compute_rider_accelerations(track_df)
+            accel_df = accel_df[['Time', 'Lateral', 'Vertical', 'Longitudinal']]
+            return accel_df
+        except Exception as e2:
+            print(f"Error in fallback method: {e2}")
+            
+            # Last resort: return simple approximation
+            n = len(track_df)
+            return pd.DataFrame({
+                'Time': np.linspace(0, n * 0.02, n),
+                'Lateral': np.zeros(n),
+                'Vertical': np.ones(n),  # 1g vertical (gravity)
+                'Longitudinal': np.zeros(n)
+            })
 
 
 if __name__ == "__main__":

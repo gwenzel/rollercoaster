@@ -9,6 +9,8 @@ __pycache__/
 *.json
 *.xlsx
 !accel_data/*
+!rfdb_csvs/*
+!submissions/*
 
 # Images
 *.png
@@ -27,3 +29,8 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
+
+
+*.mp4
+utils/__pycache__/track.cpython-311.pyc
+utils/__pycache__/visualize.cpython-311.pyc

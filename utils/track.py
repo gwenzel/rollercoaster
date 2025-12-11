@@ -58,8 +58,17 @@ def build_element(element_type, params, start_x, start_y):
         y = np.linspace(start_y, start_y + height, num_points)
     
     elif element_type == 'drop':
-        length = params['length']
-        angle = params['angle']
+        # Support both legacy (length+angle) and app-style (height+steepness) params
+        if 'height' in params:
+            height = float(params.get('height', 30))
+            # Map 'steepness' (0.5..1.0) to angle up to 30° if angle not provided
+            angle = float(params.get('angle', 30.0 * float(params.get('steepness', 0.8))))
+            # Compute length to achieve the desired vertical drop height at given angle
+            tan_ang = np.tan(np.radians(angle))
+            length = float(params.get('length', max(20.0, height / max(tan_ang, 1e-3))))
+        else:
+            length = float(params['length'])
+            angle = float(params['angle'])
         num_points = max(50, int(length * 2))
         x = np.linspace(start_x, start_x + length, num_points)
         y = start_y - (x - start_x) * np.tan(np.radians(angle))

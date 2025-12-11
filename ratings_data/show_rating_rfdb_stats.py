@@ -12,15 +12,19 @@ import os
 sns.set_style("whitegrid")
 plt.rcParams['figure.figsize'] = (14, 10)
 
-# Load mapping (prefer enhanced version if available)
-import os
-if os.path.exists('rating_to_rfdb_mapping_enhanced.csv'):
-    mapping_df = pd.read_csv('rating_to_rfdb_mapping_enhanced.csv')
-elif os.path.exists('rating_distribution_to_rfdb_mapping.csv'):
-    mapping_df = pd.read_csv('rating_distribution_to_rfdb_mapping.csv')
-else:
-    print("Error: No mapping file found!")
+"""Load mapping (prefer enhanced version) regardless of current working directory"""
+BASE_DIR = os.path.dirname(__file__)
+cand = [
+    os.path.join(BASE_DIR, 'rating_to_rfdb_mapping_enhanced.csv'),
+    os.path.join(BASE_DIR, 'rating_to_rfdb_mapping_enhanced_with_specs.csv'),
+    os.path.join(BASE_DIR, 'rating_distribution_to_rfdb_mapping.csv'),
+]
+mapping_path = next((p for p in cand if os.path.exists(p)), None)
+if not mapping_path:
+    print("Error: No mapping file found in ratings_data directory.")
+    print("Looked for: rating_to_rfdb_mapping_enhanced.csv, rating_to_rfdb_mapping_enhanced_with_specs.csv, rating_distribution_to_rfdb_mapping.csv")
     sys.exit(1)
+mapping_df = pd.read_csv(mapping_path)
 
 print("=" * 70)
 print("RATING TO RFDB MAPPING STATISTICS")
@@ -39,11 +43,16 @@ ax1.pie(match_counts, labels=[f'{label.capitalize()}\n({count} coasters)'
         autopct='%1.1f%%', colors=colors, startangle=90)
 ax1.set_title('Match Quality Distribution', fontsize=14, fontweight='bold')
 
-# 2. Similarity distribution
+# 2. Similarity distribution (use combined_similarity if present, else coaster_similarity)
 ax2 = axes[0, 1]
-ax2.hist(mapping_df['similarity'], bins=30, color='#3498db', alpha=0.7, edgecolor='black')
-ax2.axvline(mapping_df['similarity'].mean(), color='red', linestyle='--', 
-            linewidth=2, label=f'Mean: {mapping_df["similarity"].mean():.1f}%')
+sim_col = 'combined_similarity' if 'combined_similarity' in mapping_df.columns else (
+    'coaster_similarity' if 'coaster_similarity' in mapping_df.columns else None)
+if sim_col is None:
+    print("Error: mapping lacks similarity columns ('combined_similarity'/'coaster_similarity').")
+    sys.exit(1)
+ax2.hist(mapping_df[sim_col], bins=30, color='#3498db', alpha=0.7, edgecolor='black')
+ax2.axvline(mapping_df[sim_col].mean(), color='red', linestyle='--', 
+            linewidth=2, label=f'Mean: {mapping_df[sim_col].mean():.1f}%')
 ax2.axvline(95, color='green', linestyle='--', linewidth=2, label='Perfect threshold: 95%')
 ax2.set_xlabel('Similarity Score (%)', fontsize=12)
 ax2.set_ylabel('Number of Coasters', fontsize=12)
@@ -74,7 +83,12 @@ ax3.text(0.98, 0.98, stats_text, transform=ax3.transAxes,
 
 # 4. Top parks by data availability
 ax4 = axes[1, 1]
-park_stats = mapping_df.groupby('rfdb_park').agg({
+park_col = 'rfdb_park_folder' if 'rfdb_park_folder' in mapping_df.columns else (
+    'rfdb_park' if 'rfdb_park' in mapping_df.columns else None)
+if park_col is None:
+    print("Error: mapping lacks park column ('rfdb_park_folder'/'rfdb_park').")
+    sys.exit(1)
+park_stats = mapping_df.groupby(park_col).agg({
     'csv_count': 'sum',
     'coaster_id': 'count'
 }).sort_values('csv_count', ascending=False).head(15)
@@ -90,8 +104,9 @@ ax4.set_title('Top 15 Parks by Accelerometer Data', fontsize=14, fontweight='bol
 ax4.grid(axis='x', alpha=0.3)
 
 plt.tight_layout()
-plt.savefig('rating_to_rfdb_mapping_stats.png', dpi=300, bbox_inches='tight')
-print("\n✓ Visualization saved to: rating_to_rfdb_mapping_stats.png")
+out_png = os.path.join(BASE_DIR, 'rating_to_rfdb_mapping_stats.png')
+plt.savefig(out_png, dpi=300, bbox_inches='tight')
+print(f"\n✓ Visualization saved to: {out_png}")
 
 # Show detailed statistics
 print("\n" + "=" * 70)
@@ -109,8 +124,8 @@ perfect = mapping_df[mapping_df['match_type'] == 'perfect']
 fuzzy = mapping_df[mapping_df['match_type'] == 'fuzzy']
 print(f"  Perfect matches (≥95%): {len(perfect)} ({len(perfect)/len(mapping_df)*100:.1f}%)")
 print(f"  Fuzzy matches (60-95%): {len(fuzzy)} ({len(fuzzy)/len(mapping_df)*100:.1f}%)")
-print(f"  Average similarity: {mapping_df['similarity'].mean():.1f}%")
-print(f"  Median similarity: {mapping_df['similarity'].median():.1f}%")
+print(f"  Average similarity: {mapping_df[sim_col].mean():.1f}%")
+print(f"  Median similarity: {mapping_df[sim_col].median():.1f}%")
 
 print("\n📊 Data Richness:")
 well_sampled = mapping_df[mapping_df['csv_count'] >= 3]
@@ -119,7 +134,7 @@ print(f"  Coasters with ≥5 recordings: {len(mapping_df[mapping_df['csv_count']
 print(f"  Coasters with only 1 recording: {len(mapping_df[mapping_df['csv_count'] == 1])}")
 
 print("\n📊 Top 10 Parks by Total Data:")
-park_summary = mapping_df.groupby('rfdb_park').agg({
+park_summary = mapping_df.groupby(park_col).agg({
     'csv_count': 'sum',
     'coaster_id': 'count'
 }).sort_values('csv_count', ascending=False).head(10)
@@ -128,8 +143,12 @@ for park, row in park_summary.iterrows():
     print(f"  {park:30s} - {int(row['csv_count']):3d} CSVs, {int(row['coaster_id']):3d} coasters")
 
 print("\n📊 Top 10 Coasters by Data Availability:")
-top_coasters = mapping_df.nlargest(10, 'csv_count')[['ratings_name', 'csv_count', 'rfdb_park', 'similarity']]
+ratings_name_col = 'ratings_coaster' if 'ratings_coaster' in mapping_df.columns else (
+    'ratings_name' if 'ratings_name' in mapping_df.columns else None)
+if ratings_name_col is None:
+    ratings_name_col = 'ratings_coaster'  # default fallback
+top_coasters = mapping_df.nlargest(10, 'csv_count')[[ratings_name_col, 'csv_count', park_col, sim_col]]
 for _, row in top_coasters.iterrows():
-    print(f"  {row['ratings_name']:40s} - {int(row['csv_count'])} CSVs ({row['similarity']:.1f}% match)")
+    print(f"  {str(row[ratings_name_col]):40s} - {int(row['csv_count'])} CSVs ({row[sim_col]:.1f}% match)")
 
 print("\n" + "=" * 70)
