@@ -2352,6 +2352,7 @@ if st.session_state.track_generated:
     
     # Curvature Profile (collapsible, hidden by default)
     # Only show in local debug mode, not in deployment
+    """
     if _is_local_debug_mode() and hasattr(st.session_state, 'track_curvature'):
         if st.checkbox("Show Curvature Profile", value=False, key="show_curvature_profile"):
             st.markdown("**Track Curvature Profile**")
@@ -2395,9 +2396,11 @@ if st.session_state.track_generated:
             
             st.plotly_chart(fig_curve, use_container_width=True)
             st.caption("💡 Lower curvature = smoother ride. Spikes indicate sharp transitions.")
-    
+    """
+
     # Speed Profile (collapsible, hidden by default)
     # Only show in local debug mode, not in deployment
+    """
     if _is_local_debug_mode():
         if st.checkbox("Show Speed Profile", value=False, key="show_speed_profile"):
             st.markdown("**🚄 Speed Profile**")
@@ -2547,6 +2550,7 @@ if st.session_state.track_generated:
             col_speed3.metric("Min Speed", f"{velocity.min():.1f} m/s")
             col_speed4.metric("Variation", f"{speed_range:.1f} m/s", help="Difference between max and min speed")
 
+    """
     # Egg Plot Visualization (comfort envelopes)
     if 'accel_df' in st.session_state:
         accel_df = st.session_state.accel_df
