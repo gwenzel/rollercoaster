@@ -111,13 +111,26 @@ def compute_lightgbm_features(accel_df: pd.DataFrame, metadata: Dict[str, float]
         return (features, dict(zip(FEATURE_NAMES, features))) if return_dict else features
 
     lateral, vertical, longitudinal, dt = _prepare_arrays(accel_df)
-    total_g = np.sqrt(vertical ** 2 + lateral ** 2 + longitudinal ** 2)
-
+    
+    # Store raw data for vibration calculation
+    raw_lateral = lateral.copy()
+    raw_vertical = vertical.copy()
+    raw_longitudinal = longitudinal.copy()
+    
     # Rolling window size: 1 second equivalent (approx) -> round(1/dt)
+    # Match notebook: window_size=10 at 10Hz = 1.0 second
     window = max(1, int(round(1.0 / dt)))
     smoothed_lateral = _rolling_mean(lateral, window)
     smoothed_vertical = _rolling_mean(vertical, window)
     smoothed_longitudinal = _rolling_mean(longitudinal, window)
+    
+    # CRITICAL FIX: Use SMOOTHED data for all feature calculations (matching notebook)
+    # The notebook applies smoothing BEFORE computing features
+    lateral = smoothed_lateral
+    vertical = smoothed_vertical
+    longitudinal = smoothed_longitudinal
+    
+    total_g = np.sqrt(vertical ** 2 + lateral ** 2 + longitudinal ** 2)
 
     # === Original 9 ===
     num_positive_g = float(np.sum(vertical > 3.0))
@@ -164,16 +177,25 @@ def compute_lightgbm_features(accel_df: pd.DataFrame, metadata: Dict[str, float]
         rhythm_score = 0.0
 
     # === Vibration (3) ===
-    lateral_vibration = float(np.sqrt(np.mean((lateral - smoothed_lateral) ** 2)))
-    vertical_vibration = float(np.sqrt(np.mean((vertical - smoothed_vertical) ** 2)))
-    longitudinal_vibration = float(np.sqrt(np.mean((longitudinal - smoothed_longitudinal) ** 2)))
+    # Vibration = RMS difference between raw and smoothed data (noise removed by smoothing)
+    lateral_vibration = float(np.sqrt(np.mean((raw_lateral - smoothed_lateral) ** 2)))
+    vertical_vibration = float(np.sqrt(np.mean((raw_vertical - smoothed_vertical) ** 2)))
+    longitudinal_vibration = float(np.sqrt(np.mean((raw_longitudinal - smoothed_longitudinal) ** 2)))
 
     # === Airtime (3) ===
+    # Use smoothed vertical data for airtime calculations (matching notebook)
+    # Updated airtime definitions:
+    # - Floater: -0.25g to 0.25g
+    # - Flojector: -0.75g to -0.25g
+    # - Ejector: ≤ -0.75g
+    # - Total airtime: all periods below 0g
     total_samples = len(vertical)
+    # Notebook uses 10Hz sampling: total_seconds = total_samples / 10.0
+    # But we use actual dt, so: total_seconds = total_samples * dt
     total_seconds = total_samples * dt
     total_length_seconds = float(np.log1p(total_seconds))  # log(1 + seconds)
-    floater_airtime_mask = (vertical < 0.0) & (vertical >= -0.5)
-    flojector_airtime_mask = (vertical < -0.5) & (vertical >= -1.0)
+    floater_airtime_mask = (vertical >= -0.25) & (vertical <= 0.25)
+    flojector_airtime_mask = (vertical >= -0.75) & (vertical < -0.25)
     floater_airtime_proportion = float(np.sum(floater_airtime_mask) / total_samples) if total_samples > 0 else 0.0
     flojector_airtime_proportion = float(np.sum(flojector_airtime_mask) / total_samples) if total_samples > 0 else 0.0
 

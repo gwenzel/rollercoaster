@@ -110,19 +110,56 @@ def rerun_all_scores():
                     'Longitudinal': df[long_col],
                 })
                 
+                # Estimate metadata from accelerometer data
+                # Track length: estimate from time duration and average speed
+                if time_col and len(accel_df) > 1:
+                    duration_s = float(accel_df['Time'].iloc[-1] - accel_df['Time'].iloc[0])
+                else:
+                    # Estimate from sampling rate (assume ~50Hz if no time column)
+                    duration_s = float(len(accel_df) * 0.02)
+                
+                # Estimate average speed from g-forces
+                # Use total g-force as proxy for speed (higher g = higher speed typically)
+                total_g = np.sqrt(accel_df['Vertical']**2 + accel_df['Lateral']**2 + accel_df['Longitudinal']**2)
+                avg_total_g = float(np.mean(total_g))
+                # Rough estimate: avg_total_g of 1.5g ≈ 60 km/h, scale linearly
+                # This is a heuristic - actual speed depends on track geometry
+                estimated_speed_kmh = max(40.0, min(150.0, avg_total_g * 40.0))
+                
+                # Estimate track length from duration and estimated speed
+                estimated_track_length_m = float(duration_s * (estimated_speed_kmh / 3.6))  # Convert km/h to m/s
+                
+                # Estimate height from vertical g-force patterns
+                # Max positive vertical g often correlates with drop height
+                max_vert_g = float(accel_df['Vertical'].max())
+                min_vert_g = float(accel_df['Vertical'].min())
+                # Heuristic: large negative g (airtime) + large positive g (pullout) suggests big drop
+                # Rough estimate: 1g difference ≈ 10m height (conservative)
+                estimated_height_m = max(20.0, min(150.0, abs(max_vert_g - min_vert_g) * 10.0))
+                
+                metadata_for_prediction = {
+                    'height_m': estimated_height_m,
+                    'speed_kmh': estimated_speed_kmh,
+                    'track_length_m': estimated_track_length_m
+                }
+                
                 # Recalculate safety score
                 safety = check_gforce_safety(accel_df)
                 safety_score = safety['safety_score']
                 
-                # Recalculate fun rating with LightGBM
-                fun_rating = predict_score_lgb(accel_df)
+                # Recalculate fun rating with LightGBM (with estimated metadata)
+                fun_rating = predict_score_lgb(accel_df, metadata=metadata_for_prediction)
                 
-                # Prepare metadata dict for update (keep all existing fields)
+                # Prepare metadata dict for update (keep all existing fields + estimated metadata)
                 metadata = {
                     'source': 'RFDB',
                     'park': park,
                     'coaster': coaster,
-                    'csv_file': csv_file
+                    'csv_file': csv_file,
+                    # Store estimated metadata for reference (not used in prediction, already applied above)
+                    'estimated_height_m': estimated_height_m,
+                    'estimated_speed_kmh': estimated_speed_kmh,
+                    'estimated_track_length_m': estimated_track_length_m
                 }
                 
                 # Update submission

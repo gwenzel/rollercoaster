@@ -1352,10 +1352,11 @@ def check_gforce_safety(accel_df):
 
 def compute_airtime_metrics(accel_df):
     """Compute airtime metrics from vertical g data.
-    Categories match notebook definition (by vertical g in g-units):
-    - Floater Airtime: -0.5g <= Vertical < 0.0g
-    - Flojector Airtime: -1.0g <= Vertical < -0.5g
-    - Ejector Airtime: Vertical < -1.0g (not used in notebook, but kept for display)
+    Updated airtime definitions (by vertical g in g-units):
+    - Floater Airtime: -0.25g <= Vertical <= 0.25g
+    - Flojector Airtime: -0.75g <= Vertical < -0.25g
+    - Ejector Airtime: Vertical <= -0.75g
+    - Total Airtime: all periods below 0g
 
     Returns seconds for each category and total airtime.
     Uses time spacing from 'Time' column.
@@ -1370,15 +1371,17 @@ def compute_airtime_metrics(accel_df):
     else:
         dt = float(np.median(np.diff(t)))
 
-    # Notebook definitions
-    floater_mask = (g < 0.0) & (g >= -0.5)
-    flojector_mask = (g < -0.5) & (g >= -1.0)
-    ejector_mask = (g < -1.0)
+    # Updated airtime definitions
+    floater_mask = (g >= -0.25) & (g <= 0.25)
+    flojector_mask = (g >= -0.75) & (g < -0.25)
+    ejector_mask = (g <= -0.75)
 
     floater_time = float(floater_mask.sum() * dt)
     flojector_time = float(flojector_mask.sum() * dt)
     ejector_time = float(ejector_mask.sum() * dt)
-    total_airtime = floater_time + flojector_time + ejector_time
+    # Total airtime: all periods below 0g (not the sum of categories, since floater includes positive values)
+    total_airtime_mask = (g < 0.0)
+    total_airtime = float(total_airtime_mask.sum() * dt)
 
     return {
         'floater': floater_time,
@@ -1871,15 +1874,15 @@ if st.session_state.track_generated:
             else:
                 distance = x_track
             
-            # Updated definitions to match notebook:
-            # Floater: -0.5g <= Vertical < 0.0g
-            flo_mask = (g < 0.0) & (g >= -0.5)
+            # Updated airtime definitions:
+            # Floater: -0.25g <= Vertical <= 0.25g
+            flo_mask = (g >= -0.25) & (g <= 0.25)
             
-            # Flojector: -1.0g <= Vertical < -0.5g
-            flj_mask = (g < -0.5) & (g >= -1.0)
+            # Flojector: -0.75g <= Vertical < -0.25g
+            flj_mask = (g >= -0.75) & (g < -0.25)
             
-            # Ejector: Vertical < -1.0g (extreme airtime)
-            ej_mask = (g < -1.0)
+            # Ejector: Vertical <= -0.75g (extreme airtime)
+            ej_mask = (g <= -0.75)
 
             def mask_to_intervals(mask, position_array):
                 intervals = []
