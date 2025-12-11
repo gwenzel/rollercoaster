@@ -17,6 +17,16 @@ import os
 from utils.accelerometer_transform import track_to_accelerometer_data
 from utils.lgbm_predictor import predict_score_lgb, compute_lightgbm_features
 from utils.track_library import ensure_library, pick_random_entry, load_entry, add_entry
+
+
+def _is_local_debug_mode():
+    """Check if running in local debug mode (not deployment)."""
+    # In deployment, Streamlit Cloud sets these environment variables
+    is_deployment = (
+        os.getenv('STREAMLIT_SERVER_ENV') is not None or 
+        os.getenv('STREAMLIT_SHARING') is not None
+    )
+    return not is_deployment
 from utils.track_blocks import (
     lift_hill_profile,
     vertical_drop_profile,
@@ -159,8 +169,13 @@ with st.sidebar:
     
     col_rand1_top, col_rand2_top = st.columns(2)
     
+    # Initialize button counter to ensure unique keys even on reload
+    if 'button_counter' not in st.session_state:
+        st.session_state.button_counter = 0
+    st.session_state.button_counter += 1
+    
     with col_rand1_top:
-        if st.button("🎲 Random Template", key="btn_random_template_quickstart", use_container_width=True, help="Generate a random coaster with 5-10 blocks"):
+        if st.button("🎲 Random Template", key=f"btn_random_template_quickstart_{st.session_state.button_counter}", use_container_width=True, help="Generate a random coaster with 5-10 blocks"):
             import random
             
             # Random number of blocks (targeting ~500m)
@@ -292,7 +307,7 @@ with st.sidebar:
             st.rerun()
     
     with col_rand2_top:
-        if st.button("🔄 \n Reset to Default", key="btn_reset_default_quickstart", use_container_width=True, help="Reset to the starter template"):
+        if st.button("🔄 \n Reset to Default", key=f"btn_reset_default_quickstart_{st.session_state.button_counter}", use_container_width=True, help="Reset to the starter template"):
             st.session_state.track_sequence = [
                 {
                     'type': 'launch',
@@ -2077,116 +2092,118 @@ if st.session_state.track_generated:
     st.divider()
     
     # Particle Simulation along the track (on-demand) - FULL WIDTH
-    st.markdown("**🎬 Particle Simulation (Track Traversal)**")
-    run_sim = st.button("Run Particle Simulation")
-    if run_sim and 'accel_df' in st.session_state and 'track_x' in st.session_state and 'track_y' in st.session_state:
-        sim_time = st.session_state.accel_df['Time'].values
-        x = np.array(st.session_state.track_x)
-        y = np.array(st.session_state.track_y)
-        n = len(x)
-        # Build fractional indices across the track to avoid stalls between points
-        if len(sim_time) <= 1 or n <= 1:
-            st.info("Not enough points to simulate.")
-        else:
-            idx_float = np.linspace(0, n - 1, len(sim_time))
-            i0 = np.floor(idx_float).astype(int)
-            i1 = np.minimum(i0 + 1, n - 1)
-            alpha = idx_float - i0
-            xp = x[i0] * (1 - alpha) + x[i1] * alpha
-            yp = y[i0] * (1 - alpha) + y[i1] * alpha
-            # Compute smooth tangents from interpolated points using central differences
-            tx = np.zeros_like(xp)
-            ty = np.zeros_like(yp)
-            for k in range(len(xp)):
-                if k == 0:
-                    dxk = xp[1] - xp[0]
-                    dyk = yp[1] - yp[0]
-                elif k == len(xp) - 1:
-                    dxk = xp[-1] - xp[-2]
-                    dyk = yp[-1] - yp[-2]
-                else:
-                    dxk = xp[k + 1] - xp[k - 1]
-                    dyk = yp[k + 1] - yp[k - 1]
-                normk = np.hypot(dxk, dyk)
-                if normk == 0:
-                    tx[k], ty[k] = 1.0, 0.0
-                else:
-                    tx[k], ty[k] = dxk / normk, dyk / normk
-            # Normals from tangents
-            nx = -ty
-            ny = tx
-            # Enforce normal continuity to avoid flips at segment boundaries
-            for k in range(1, len(nx)):
-                if nx[k - 1] * nx[k] + ny[k - 1] * ny[k] < 0:
-                    nx[k] = -nx[k]
-                    ny[k] = -ny[k]
+    # Only show in local debug mode, not in deployment
+    if _is_local_debug_mode():
+        st.markdown("**🎬 Particle Simulation (Track Traversal)**")
+        run_sim = st.button("Run Particle Simulation")
+        if run_sim and 'accel_df' in st.session_state and 'track_x' in st.session_state and 'track_y' in st.session_state:
+            sim_time = st.session_state.accel_df['Time'].values
+            x = np.array(st.session_state.track_x)
+            y = np.array(st.session_state.track_y)
+            n = len(x)
+            # Build fractional indices across the track to avoid stalls between points
+            if len(sim_time) <= 1 or n <= 1:
+                st.info("Not enough points to simulate.")
+            else:
+                idx_float = np.linspace(0, n - 1, len(sim_time))
+                i0 = np.floor(idx_float).astype(int)
+                i1 = np.minimum(i0 + 1, n - 1)
+                alpha = idx_float - i0
+                xp = x[i0] * (1 - alpha) + x[i1] * alpha
+                yp = y[i0] * (1 - alpha) + y[i1] * alpha
+                # Compute smooth tangents from interpolated points using central differences
+                tx = np.zeros_like(xp)
+                ty = np.zeros_like(yp)
+                for k in range(len(xp)):
+                    if k == 0:
+                        dxk = xp[1] - xp[0]
+                        dyk = yp[1] - yp[0]
+                    elif k == len(xp) - 1:
+                        dxk = xp[-1] - xp[-2]
+                        dyk = yp[-1] - yp[-2]
+                    else:
+                        dxk = xp[k + 1] - xp[k - 1]
+                        dyk = yp[k + 1] - yp[k - 1]
+                        normk = np.hypot(dxk, dyk)
+                    if normk == 0:
+                        tx[k], ty[k] = 1.0, 0.0
+                    else:
+                        tx[k], ty[k] = dxk / normk, dyk / normk
+                # Normals from tangents
+                nx = -ty
+                ny = tx
+                # Enforce normal continuity to avoid flips at segment boundaries
+                for k in range(1, len(nx)):
+                    if nx[k - 1] * nx[k] + ny[k - 1] * ny[k] < 0:
+                        nx[k] = -nx[k]
+                        ny[k] = -ny[k]
 
-            import plotly.graph_objects as go
-            # Use the same vertical g column as other plots: 'Vertical'
-            df = st.session_state.accel_df
-            vert_g = df['Vertical'].values if 'Vertical' in df.columns else None
-            # Smooth vertical g to reduce jitter in arrows
-            if vert_g is not None:
-                from scipy.ndimage import gaussian_filter1d
-                vert_g_smooth = gaussian_filter1d(vert_g, sigma=2.0, mode='nearest')
-            else:
-                vert_g_smooth = None
-            # Scale factor for arrow length per 1g (smaller to reduce size)
-            arrow_scale = 5.0
-            # Downsample frames if very long to keep UI responsive
-            max_frames = 900
-            if len(xp) > max_frames:
-                step = int(np.ceil(len(xp) / max_frames))
-            else:
-                step = 1
-            frames = []
-            for i in range(0, len(xp), step):
+                import plotly.graph_objects as go
+                # Use the same vertical g column as other plots: 'Vertical'
+                df = st.session_state.accel_df
+                vert_g = df['Vertical'].values if 'Vertical' in df.columns else None
+                # Smooth vertical g to reduce jitter in arrows
+                if vert_g is not None:
+                    from scipy.ndimage import gaussian_filter1d
+                    vert_g_smooth = gaussian_filter1d(vert_g, sigma=2.0, mode='nearest')
+                else:
+                    vert_g_smooth = None
+                # Scale factor for arrow length per 1g (smaller to reduce size)
+                arrow_scale = 5.0
+                # Downsample frames if very long to keep UI responsive
+                max_frames = 900
+                if len(xp) > max_frames:
+                    step = int(np.ceil(len(xp) / max_frames))
+                else:
+                    step = 1
+                frames = []
+                for i in range(0, len(xp), step):
                 # Use precomputed smooth normals
-                nxi, nyi = nx[i], ny[i]
+                    nxi, nyi = nx[i], ny[i]
                 # Acceleration vector along normal using vertical g if available
                 # Flip sign for visualization: positive G (downward force) points down
-                if vert_g_smooth is not None and i < len(vert_g_smooth):
-                    g_val = vert_g_smooth[i]
-                    axv = -arrow_scale * g_val * nxi  # Negative sign so 1g points down
-                    ayv = -arrow_scale * g_val * nyi  # Negative sign so 1g points down
-                    accel_trace = go.Scatter(x=[xp[i], xp[i] + axv], y=[yp[i], yp[i] + ayv], mode='lines',
-                                             line=dict(color='#2ca02c', width=3), name='Acceleration')
-                else:
-                    accel_trace = go.Scatter(x=[xp[i], xp[i]], y=[yp[i], yp[i]], mode='lines',
-                                             line=dict(color='#2ca02c', width=3), name='Acceleration')
-                frames.append(go.Frame(data=[
-                    go.Scatter(x=x, y=y, mode='lines', line=dict(color='rgb(255,75,75)', width=3), name='Track'),
-                    go.Scatter(x=[xp[i]], y=[yp[i]], mode='markers', marker=dict(size=12, color='#1f77b4'), name='Particle'),
-                    accel_trace
+                    if vert_g_smooth is not None and i < len(vert_g_smooth):
+                        g_val = vert_g_smooth[i]
+                        axv = -arrow_scale * g_val * nxi  # Negative sign so 1g points down
+                        ayv = -arrow_scale * g_val * nyi  # Negative sign so 1g points down
+                        accel_trace = go.Scatter(x=[xp[i], xp[i] + axv], y=[yp[i], yp[i] + ayv], mode='lines',
+                    line=dict(color='#2ca02c', width=3), name='Acceleration')
+                    else:
+                        accel_trace = go.Scatter(x=[xp[i], xp[i]], y=[yp[i], yp[i]], mode='lines',
+                    line=dict(color='#2ca02c', width=3), name='Acceleration')
+                        frames.append(go.Frame(data=[
+                go.Scatter(x=x, y=y, mode='lines', line=dict(color='rgb(255,75,75)', width=3), name='Track'),
+                go.Scatter(x=[xp[i]], y=[yp[i]], mode='markers', marker=dict(size=12, color='#1f77b4'), name='Particle'),
+                accel_trace
                 ], name=str(i)))
 
-            fig_sim = go.Figure(
+                fig_sim = go.Figure(
                 data=[
-                    go.Scatter(x=x, y=y, mode='lines', line=dict(color='rgb(255,75,75)', width=3), name='Track'),
-                    go.Scatter(x=[xp[0]], y=[yp[0]], mode='markers', marker=dict(size=12, color='#1f77b4'), name='Particle')
+                go.Scatter(x=x, y=y, mode='lines', line=dict(color='rgb(255,75,75)', width=3), name='Track'),
+                go.Scatter(x=[xp[0]], y=[yp[0]], mode='markers', marker=dict(size=12, color='#1f77b4'), name='Particle')
                 ],
                 frames=frames
-            )
-            # Add initial acceleration vector to match frame traces if available
-            # Initial acceleration vector using smooth normal
-            # Flip sign for visualization: positive G (downward force) points down
-            if vert_g is not None and len(vert_g) > 0:
-                axv0 = -arrow_scale * vert_g[0] * nx[0]  # Negative sign so 1g points down
-                ayv0 = -arrow_scale * vert_g[0] * ny[0]  # Negative sign so 1g points down
-                fig_sim.add_trace(go.Scatter(x=[xp[0], xp[0] + axv0], y=[yp[0], yp[0] + ayv0], mode='lines',
-                                             line=dict(color='#2ca02c', width=3), name='Acceleration'))
-            fig_sim.update_layout(
+                )
+                # Add initial acceleration vector to match frame traces if available
+                # Initial acceleration vector using smooth normal
+                # Flip sign for visualization: positive G (downward force) points down
+                if vert_g is not None and len(vert_g) > 0:
+                    axv0 = -arrow_scale * vert_g[0] * nx[0]  # Negative sign so 1g points down
+                    ayv0 = -arrow_scale * vert_g[0] * ny[0]  # Negative sign so 1g points down
+                    fig_sim.add_trace(go.Scatter(x=[xp[0], xp[0] + axv0], y=[yp[0], yp[0] + ayv0], mode='lines',
+                                                 line=dict(color='#2ca02c', width=3), name='Acceleration'))
+                fig_sim.update_layout(
                 xaxis_title='Distance (m)', yaxis_title='Height (m)',
                 height=400, margin=dict(l=20, r=20, t=30, b=20),
                 updatemenus=[{
-                    'type': 'buttons',
-                    'buttons': [
-                        {'label': 'Play', 'method': 'animate', 'args': [None, {'fromcurrent': True, 'frame': {'duration': 30, 'redraw': True}, 'transition': {'duration': 0}}]},
-                        {'label': 'Pause', 'method': 'animate', 'args': [[None], {'mode': 'immediate', 'transition': {'duration': 0}, 'frame': {'duration': 0, 'redraw': False}}]}
-                    ]
+                'type': 'buttons',
+                'buttons': [
+                {'label': 'Play', 'method': 'animate', 'args': [None, {'fromcurrent': True, 'frame': {'duration': 30, 'redraw': True}, 'transition': {'duration': 0}}]},
+                {'label': 'Pause', 'method': 'animate', 'args': [[None], {'mode': 'immediate', 'transition': {'duration': 0}, 'frame': {'duration': 0, 'redraw': False}}]}
+                ]
                 }]
-            )
-            st.plotly_chart(fig_sim, use_container_width=True)
+                )
+                st.plotly_chart(fig_sim, use_container_width=True)
     
     st.divider()
     
@@ -2334,7 +2351,8 @@ if st.session_state.track_generated:
         st.plotly_chart(fig_g, use_container_width=True)
     
     # Curvature Profile (collapsible, hidden by default)
-    if hasattr(st.session_state, 'track_curvature'):
+    # Only show in local debug mode, not in deployment
+    if _is_local_debug_mode() and hasattr(st.session_state, 'track_curvature'):
         if st.checkbox("Show Curvature Profile", value=False, key="show_curvature_profile"):
             st.markdown("**Track Curvature Profile**")
             
@@ -2379,12 +2397,14 @@ if st.session_state.track_generated:
             st.caption("💡 Lower curvature = smoother ride. Spikes indicate sharp transitions.")
     
     # Speed Profile (collapsible, hidden by default)
-    if st.checkbox("Show Speed Profile", value=False, key="show_speed_profile"):
-        st.markdown("**🚄 Speed Profile**")
-        if 'accel_df' in st.session_state:
-            # Get speed data from the acceleration computation
-            # We need to recalculate or access it from the physics engine
-            from utils.accelerometer_transform import compute_rider_accelerations
+    # Only show in local debug mode, not in deployment
+    if _is_local_debug_mode():
+        if st.checkbox("Show Speed Profile", value=False, key="show_speed_profile"):
+            st.markdown("**🚄 Speed Profile**")
+            if 'accel_df' in st.session_state:
+                # Get speed data from the acceleration computation
+                # We need to recalculate or access it from the physics engine
+                from utils.accelerometer_transform import compute_rider_accelerations
             
             # Recompute to get velocity data
             track_df = pd.DataFrame({

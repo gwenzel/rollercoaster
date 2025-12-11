@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import numpy as np
 from datetime import datetime
-from utils.submission_manager import load_submissions_from_s3, load_submission_geometry_from_s3
+from utils.submission_manager import load_submissions, load_submission_geometry
 
 
 def calculate_pareto_front(submissions):
@@ -50,7 +50,7 @@ st.caption("Ranked by combined score (Fun Rating + Safety Score)")
 
 # Load submissions from S3
 with st.spinner("Loading leaderboard..."):
-    submissions = load_submissions_from_s3()
+    submissions = load_submissions()
 
 if not submissions:
     st.info("No submissions yet. Be the first to submit your rollercoaster design!")
@@ -421,7 +421,7 @@ else:
             else:
                 # Load and display geometry for user-submitted tracks
                 with st.spinner("Loading track geometry..."):
-                    geometry = load_submission_geometry_from_s3(selected_submission['submission_id'])
+                    geometry = load_submission_geometry(selected_submission['submission_id'])
                 
                 if geometry and len(geometry.get('x', [])) > 1:
                     st.markdown("**Track Profile**")
