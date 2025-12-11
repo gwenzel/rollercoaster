@@ -2013,67 +2013,64 @@ if st.session_state.track_generated:
                 )
                 st.caption("Total")
         
-        # Hidden panel with comprehensive features
+        # Hidden panel with comprehensive features - compact list format
         with st.expander("🔬 Advanced Ride Features", expanded=False):
             ride_features = st.session_state.get('ride_features')
             if ride_features:
-                st.markdown("**📊 Comprehensive Ride Analysis**")
+                # Compact list format with smaller font
+                features_html = """
+                <div style="font-size: 0.75rem; line-height: 1.4;">
+                <strong style="font-size: 0.8rem;">🎯 Basic:</strong> 
+                Pos G Peaks: {num_positive_g_peaks:.0f} | 
+                Max Neg G: {max_negative_vertical_g:.2f}g | 
+                Max Pos G: {max_positive_vertical_g:.2f}g | 
+                Max Lat G: {max_lateral_g:.2f}g<br>
                 
-                # Basic Features
-                st.markdown("**🎯 Basic Features**")
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Positive G Peaks (>3g)", f"{ride_features.get('num_positive_g_peaks', 0):.0f}")
-                with col2:
-                    st.metric("Max Negative G", f"{ride_features.get('max_negative_vertical_g', 0):.2f}g")
-                with col3:
-                    st.metric("Max Positive G", f"{ride_features.get('max_positive_vertical_g', 0):.2f}g")
-                with col4:
-                    st.metric("Max Lateral G", f"{ride_features.get('max_lateral_g', 0):.2f}g")
+                <strong style="font-size: 0.8rem;">🌊 Smoothness:</strong> 
+                Vert Variance: {vertical_variance:.3f} | 
+                Vert Jerk: {vertical_jerk:.3f} | 
+                Avg Total G: {avg_total_g:.2f}g | 
+                Rhythm: {rhythm_score:.3f}<br>
                 
-                # Smoothness Features
-                st.markdown("**🌊 Smoothness & Rhythm**")
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Vertical Variance", f"{ride_features.get('vertical_variance', 0):.3f}")
-                with col2:
-                    st.metric("Vertical Jerk", f"{ride_features.get('vertical_jerk', 0):.3f}")
-                with col3:
-                    st.metric("Avg Total G", f"{ride_features.get('avg_total_g', 0):.2f}g")
-                with col4:
-                    st.metric("Rhythm Score", f"{ride_features.get('rhythm_score', 0):.3f}")
+                <strong style="font-size: 0.8rem;">⚡ Dynamics:</strong> 
+                Airtime×G: {airtime_gforce_interaction:.2f} | 
+                G Range: {g_force_range:.2f}g | 
+                Lat Jerk: {lateral_jerk:.3f} | 
+                Skewness: {g_force_skewness:.2f}<br>
                 
-                # Advanced Features
-                st.markdown("**⚡ Advanced Dynamics**")
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Airtime×G-Force", f"{ride_features.get('airtime_gforce_interaction', 0):.2f}")
-                with col2:
-                    st.metric("G-Force Range", f"{ride_features.get('g_force_range', 0):.2f}g")
-                with col3:
-                    st.metric("Lateral Jerk", f"{ride_features.get('lateral_jerk', 0):.3f}")
-                with col4:
-                    st.metric("G-Force Skewness", f"{ride_features.get('g_force_skewness', 0):.2f}")
+                <strong style="font-size: 0.8rem;">📈 Intensity:</strong> 
+                Pacing: {intensity_pacing:.2f} | 
+                Transitions: {force_transitions:.3f} | 
+                Peak Density: {peak_density:.1f} | 
+                Max Long G: {max_longitudinal_g:.2f}g<br>
                 
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Intensity Pacing", f"{ride_features.get('intensity_pacing', 0):.2f}")
-                with col2:
-                    st.metric("Force Transitions", f"{ride_features.get('force_transitions', 0):.3f}")
-                with col3:
-                    st.metric("Peak Density", f"{ride_features.get('peak_density', 0):.1f}")
-                with col4:
-                    st.metric("Max Longitudinal G", f"{ride_features.get('max_longitudinal_g', 0):.2f}g")
-                
-                # Vibration Features
-                st.markdown("**📳 Vibration Analysis**")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Lateral Vibration", f"{ride_features.get('lateral_vibration', 0):.3f}")
-                with col2:
-                    st.metric("Vertical Vibration", f"{ride_features.get('vertical_vibration', 0):.3f}")
-                with col3:
-                    st.metric("Longitudinal Vibration", f"{ride_features.get('longitudinal_vibration', 0):.3f}")
+                <strong style="font-size: 0.8rem;">📳 Vibration:</strong> 
+                Lateral: {lateral_vibration:.3f} | 
+                Vertical: {vertical_vibration:.3f} | 
+                Longitudinal: {longitudinal_vibration:.3f}
+                </div>
+                """.format(
+                    num_positive_g_peaks=ride_features.get('num_positive_g_peaks', 0),
+                    max_negative_vertical_g=ride_features.get('max_negative_vertical_g', 0),
+                    max_positive_vertical_g=ride_features.get('max_positive_vertical_g', 0),
+                    max_lateral_g=ride_features.get('max_lateral_g', 0),
+                    vertical_variance=ride_features.get('vertical_variance', 0),
+                    vertical_jerk=ride_features.get('vertical_jerk', 0),
+                    avg_total_g=ride_features.get('avg_total_g', 0),
+                    rhythm_score=ride_features.get('rhythm_score', 0),
+                    airtime_gforce_interaction=ride_features.get('airtime_gforce_interaction', 0),
+                    g_force_range=ride_features.get('g_force_range', 0),
+                    lateral_jerk=ride_features.get('lateral_jerk', 0),
+                    g_force_skewness=ride_features.get('g_force_skewness', 0),
+                    intensity_pacing=ride_features.get('intensity_pacing', 0),
+                    force_transitions=ride_features.get('force_transitions', 0),
+                    peak_density=ride_features.get('peak_density', 0),
+                    max_longitudinal_g=ride_features.get('max_longitudinal_g', 0),
+                    lateral_vibration=ride_features.get('lateral_vibration', 0),
+                    vertical_vibration=ride_features.get('vertical_vibration', 0),
+                    longitudinal_vibration=ride_features.get('longitudinal_vibration', 0)
+                )
+                st.markdown(features_html, unsafe_allow_html=True)
             else:
                 st.info("Generate a track and run physics simulation to see advanced features.")
         
