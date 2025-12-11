@@ -1259,79 +1259,79 @@ def check_gforce_safety(accel_df):
     safety_score = 5.0
     
     # Continuous penalty for vertical g-forces (positive)
-    # Penalty increases smoothly from 2g onwards
+    # Penalty increases smoothly from 2g onwards - INCREASED for more differentiation
     if max_vertical > 2.0:
-        # Gradual penalty: 0 at 2g, increases to -2.5 at 5g, -4.0 at 7g
+        # Gradual penalty: 0 at 2g, increases more steeply for better differentiation
         vertical_penalty = 0.0
         if max_vertical > 5.0:
-            # Critical: -2.5 base, then -0.5 per g above 5g
-            vertical_penalty = -2.5 - 0.5 * (max_vertical - 5.0)
+            # Critical: -3.0 base (was -2.5), then -0.6 per g above 5g (was -0.5)
+            vertical_penalty = -3.0 - 0.6 * (max_vertical - 5.0)
         elif max_vertical > 4.0:
-            # High: -1.5 base, then -0.33 per g above 4g
-            vertical_penalty = -1.5 - 0.33 * (max_vertical - 4.0)
+            # High: -2.0 base (was -1.5), then -0.5 per g above 4g (was -0.33)
+            vertical_penalty = -2.0 - 0.5 * (max_vertical - 4.0)
         elif max_vertical > 3.0:
-            # Moderate: -0.5 base, then -0.33 per g above 3g
-            vertical_penalty = -0.5 - 0.33 * (max_vertical - 3.0)
+            # Moderate: -0.8 base (was -0.5), then -0.5 per g above 3g (was -0.33)
+            vertical_penalty = -0.8 - 0.5 * (max_vertical - 3.0)
         elif max_vertical > 2.0:
-            # Low: -0.1 per g above 2g
-            vertical_penalty = -0.1 * (max_vertical - 2.0)
+            # Low: -0.15 per g above 2g (was -0.1)
+            vertical_penalty = -0.15 * (max_vertical - 2.0)
         safety_score += vertical_penalty
     
     # Continuous penalty for negative g-forces (airtime)
-    # Penalty increases smoothly from -1g onwards
+    # Penalty increases smoothly from -1g onwards - INCREASED for more differentiation
     if min_vertical < -1.0:
         vertical_neg_penalty = 0.0
         if min_vertical < -3.0:
-            # Critical: -2.5 base, then -0.5 per g below -3g
-            vertical_neg_penalty = -2.5 - 0.5 * abs(min_vertical + 3.0)
+            # Critical: -3.0 base (was -2.5), then -0.6 per g below -3g (was -0.5)
+            vertical_neg_penalty = -3.0 - 0.6 * abs(min_vertical + 3.0)
         elif min_vertical < -2.0:
-            # High: -1.5 base, then -0.5 per g below -2g
-            vertical_neg_penalty = -1.5 - 0.5 * abs(min_vertical + 2.0)
+            # High: -2.0 base (was -1.5), then -0.6 per g below -2g (was -0.5)
+            vertical_neg_penalty = -2.0 - 0.6 * abs(min_vertical + 2.0)
         elif min_vertical < -1.5:
-            # Moderate: -0.5 base, then -0.33 per g below -1.5g
-            vertical_neg_penalty = -0.5 - 0.33 * abs(min_vertical + 1.5)
+            # Moderate: -0.7 base (was -0.5), then -0.4 per g below -1.5g (was -0.33)
+            vertical_neg_penalty = -0.7 - 0.4 * abs(min_vertical + 1.5)
         elif min_vertical < -1.0:
-            # Low: -0.2 per g below -1g
-            vertical_neg_penalty = -0.2 * abs(min_vertical + 1.0)
+            # Low: -0.25 per g below -1g (was -0.2)
+            vertical_neg_penalty = -0.25 * abs(min_vertical + 1.0)
         safety_score += vertical_neg_penalty
     
     # Continuous penalty for lateral g-forces
-    # Penalty increases smoothly from 1g onwards
+    # Penalty increases smoothly from 1g onwards - INCREASED for more differentiation
     if max_lateral > 1.0:
         lateral_penalty = 0.0
         if max_lateral > 5.0:
-            # Critical: -2.5 base, then -0.4 per g above 5g
-            lateral_penalty = -2.5 - 0.4 * (max_lateral - 5.0)
+            # Critical: -3.0 base (was -2.5), then -0.5 per g above 5g (was -0.4)
+            lateral_penalty = -3.0 - 0.5 * (max_lateral - 5.0)
         elif max_lateral > 3.0:
-            # High: -1.2 base, then -0.43 per g above 3g
-            lateral_penalty = -1.2 - 0.43 * (max_lateral - 3.0)
+            # High: -1.5 base (was -1.2), then -0.5 per g above 3g (was -0.43)
+            lateral_penalty = -1.5 - 0.5 * (max_lateral - 3.0)
         elif max_lateral > 2.0:
-            # Moderate: -0.5 base, then -0.35 per g above 2g
-            lateral_penalty = -0.5 - 0.35 * (max_lateral - 2.0)
+            # Moderate: -0.7 base (was -0.5), then -0.4 per g above 2g (was -0.35)
+            lateral_penalty = -0.7 - 0.4 * (max_lateral - 2.0)
         elif max_lateral > 1.5:
-            # Low: -0.2 base, then -0.6 per g above 1.5g
-            lateral_penalty = -0.2 - 0.6 * (max_lateral - 1.5)
+            # Low: -0.3 base (was -0.2), then -0.7 per g above 1.5g (was -0.6)
+            lateral_penalty = -0.3 - 0.7 * (max_lateral - 1.5)
         elif max_lateral > 1.0:
-            # Very low: -0.1 per g above 1g
-            lateral_penalty = -0.1 * (max_lateral - 1.0)
+            # Very low: -0.15 per g above 1g (was -0.1)
+            lateral_penalty = -0.15 * (max_lateral - 1.0)
         safety_score += lateral_penalty
     
     # Continuous penalty for longitudinal g-forces
-    # Penalty increases smoothly from 2g onwards
+    # Penalty increases smoothly from 2g onwards - INCREASED for more differentiation
     if max_longitudinal > 2.0:
         longitudinal_penalty = 0.0
         if max_longitudinal > 4.0:
-            # High: -1.0 base, then -0.25 per g above 4g
-            longitudinal_penalty = -1.0 - 0.25 * (max_longitudinal - 4.0)
+            # High: -1.3 base (was -1.0), then -0.3 per g above 4g (was -0.25)
+            longitudinal_penalty = -1.3 - 0.3 * (max_longitudinal - 4.0)
         elif max_longitudinal > 3.0:
-            # Moderate: -0.5 base, then -0.5 per g above 3g
-            longitudinal_penalty = -0.5 - 0.5 * (max_longitudinal - 3.0)
+            # Moderate: -0.7 base (was -0.5), then -0.6 per g above 3g (was -0.5)
+            longitudinal_penalty = -0.7 - 0.6 * (max_longitudinal - 3.0)
         elif max_longitudinal > 2.5:
-            # Low: -0.2 base, then -0.6 per g above 2.5g
-            longitudinal_penalty = -0.2 - 0.6 * (max_longitudinal - 2.5)
+            # Low: -0.3 base (was -0.2), then -0.7 per g above 2.5g (was -0.6)
+            longitudinal_penalty = -0.3 - 0.7 * (max_longitudinal - 2.5)
         elif max_longitudinal > 2.0:
-            # Very low: -0.1 per g above 2g
-            longitudinal_penalty = -0.1 * (max_longitudinal - 2.0)
+            # Very low: -0.15 per g above 2g (was -0.1)
+            longitudinal_penalty = -0.15 * (max_longitudinal - 2.0)
         safety_score += longitudinal_penalty
     
     # Clamp to 0-5 range

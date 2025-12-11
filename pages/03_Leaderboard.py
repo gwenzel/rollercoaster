@@ -14,7 +14,7 @@ def calculate_pareto_front(submissions):
     - Higher safety score
     
     Returns:
-        List of indices of submissions on the Pareto front, sorted by score
+        List of indices of submissions on the Pareto front, sorted by score (descending)
     """
     if not submissions:
         return []
@@ -28,18 +28,17 @@ def calculate_pareto_front(submissions):
                 continue
             # Check if sub_j dominates sub_i
             # sub_j dominates sub_i if it has both higher score AND higher safety_score
-            # Using >= to handle ties properly
-            if sub_j['score'] >= sub_i['score'] and sub_j['safety_score'] >= sub_i['safety_score']:
-                # If one is strictly greater, it dominates
-                if sub_j['score'] > sub_i['score'] or sub_j['safety_score'] > sub_i['safety_score']:
-                    is_dominated = True
-                    break
+            # (at least one strictly greater)
+            if (sub_j['score'] > sub_i['score'] and sub_j['safety_score'] >= sub_i['safety_score']) or \
+               (sub_j['score'] >= sub_i['score'] and sub_j['safety_score'] > sub_i['safety_score']):
+                is_dominated = True
+                break
         
         if not is_dominated:
             pareto_indices.append(i)
     
-    # Sort by score (descending) for consistent ordering
-    pareto_indices.sort(key=lambda idx: submissions[idx]['score'], reverse=True)
+    # Sort by score (descending), then by safety (descending) for consistent ordering
+    pareto_indices.sort(key=lambda idx: (submissions[idx]['score'], submissions[idx]['safety_score']), reverse=True)
     
     return pareto_indices
 
@@ -83,11 +82,11 @@ else:
     pareto_indices = calculate_pareto_front(submissions)
     pareto_set = set(pareto_indices)
     
-    # Calculate utopia point (ideal point: max fun rating, max safety score)
+    # Calculate utopia point (ideal point: always 5.0, 5.0 - the theoretical maximum)
     all_scores = [s['score'] for s in submissions]
     all_safety = [s['safety_score'] for s in submissions]
-    utopia_score = max(all_scores) if all_scores else 0
-    utopia_safety = max(all_safety) if all_safety else 0
+    utopia_score = 5.0
+    utopia_safety = 5.0
     
     # Create scatter plot
     fig_pareto = go.Figure()
@@ -163,36 +162,54 @@ else:
         else:
             pareto_user_points.append(point)
     
-    # Sort both lists by fun rating (x-axis) descending
-    pareto_user_points.sort(key=lambda x: (x[0], -x[1]), reverse=True)
-    pareto_rfdb_points.sort(key=lambda x: (x[0], -x[1]), reverse=True)
+    # Sort both lists by fun rating (x-axis) descending, then safety descending
+    pareto_user_points.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    pareto_rfdb_points.sort(key=lambda x: (x[0], x[1]), reverse=True)
     
     # Combine for line (all Pareto points)
     all_pareto_points = pareto_user_points + pareto_rfdb_points
-    all_pareto_points.sort(key=lambda x: x[0], reverse=True)
     
     if all_pareto_points:
-        pareto_scores = [p[0] for p in all_pareto_points]
-        pareto_safety = [p[1] for p in all_pareto_points]
+        # For a proper Pareto front visualization, we need to show the efficient frontier
+        # Sort all points by fun rating (x-axis) descending, then safety descending
+        all_pareto_points_sorted = sorted(all_pareto_points, key=lambda x: (x[0], x[1]), reverse=True)
+        
+        pareto_scores = [p[0] for p in all_pareto_points_sorted]
+        pareto_safety = [p[1] for p in all_pareto_points_sorted]
+        
+        # Extend the frontier to the rightmost point in the cloud
+        # This ensures the line covers the rightmost part of the data
+        if all_scores and pareto_scores:
+            max_fun_rating = max(all_scores)
+            rightmost_pareto_score = pareto_scores[0]  # Already sorted descending
+            
+            # If the rightmost point in the cloud is to the right of the rightmost Pareto point,
+            # extend the line horizontally to cover it
+            if max_fun_rating > rightmost_pareto_score + 0.01:  # Tolerance for floating point
+                # Find the safety score of the rightmost point
+                max_fun_idx = all_scores.index(max_fun_rating)
+                max_fun_safety = all_safety[max_fun_idx]
+                # Extend horizontally: add point at (max_fun_rating, same safety as rightmost Pareto point)
+                # This creates a horizontal extension to the right
+                pareto_scores.insert(0, max_fun_rating)
+                pareto_safety.insert(0, pareto_safety[0])  # Keep same safety level for horizontal extension
         
         # Add connecting line FIRST (so it appears behind markers) - only if we have multiple points
         if len(pareto_scores) > 1:
-            # For a proper Pareto front, we want to show the trade-off curve
-            # Sort by x-axis (fun rating) descending for line connection
-            sorted_for_line = sorted(zip(pareto_scores, pareto_safety), key=lambda x: x[0], reverse=True)
-            line_scores = [p[0] for p in sorted_for_line]
-            line_safety = [p[1] for p in sorted_for_line]
+            # For Pareto front, connect points in order to show the efficient frontier
+            # Points are sorted by fun rating descending (rightmost first)
+            # This creates a curve showing the trade-off between fun and safety
             
             # Add the line trace with more visible styling
             # Draw line BEFORE markers so it appears behind them
             fig_pareto.add_trace(go.Scatter(
-                x=line_scores,
-                y=line_safety,
+                x=pareto_scores,
+                y=pareto_safety,
                 mode='lines',
                 line=dict(
                     color='#FF0000',  # Bright red
-                    width=4,  # Thicker line for visibility
-                    dash='dash'
+                    width=3,  # Thicker line for visibility
+                    dash='solid'  # Solid line for cleaner look
                 ),
                 name='Pareto Front',
                 hoverinfo='skip',
@@ -250,20 +267,21 @@ else:
                 legendgroup='pareto'
             ))
     
-    # Add utopia point (ideal point)
+    # Add utopia point (ideal point: always 5.0, 5.0 - the theoretical maximum)
     fig_pareto.add_trace(go.Scatter(
         x=[5.0],
         y=[5.0],
         mode='markers',
         marker=dict(
             color='blue',
-            size=16,
+            size=18,
             symbol='star',
-            line=dict(width=2, color='darkblue')
+            line=dict(width=2, color='darkblue'),
+            opacity=0.8
         ),
         name='Utopia Point (Ideal)',
-        text=['Utopia Point'],
-        hovertemplate='<b>Utopia Point (Ideal)</b><br>Fun Rating: %{x:.2f}⭐<br>Safety: %{y:.2f}★<br><i>Theoretical best: max of both objectives</i><extra></extra>'
+        text=['Utopia Point (5.0⭐, 5.0★)'],
+        hovertemplate='<b>Utopia Point (Ideal)</b><br>Fun Rating: 5.00⭐<br>Safety: 5.00★<br><i>Theoretical maximum: perfect fun rating and perfect safety</i><extra></extra>'
     ))
     
     # Calculate axis ranges - ensure we can see the full 0-5 range, especially near boundaries
