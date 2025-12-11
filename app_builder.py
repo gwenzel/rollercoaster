@@ -164,25 +164,29 @@ if 'initialized' not in st.session_state:
 with st.sidebar:
     st.header("🧱 Building Blocks")
     
+    # Show success message from random generation if it exists
+    if 'random_gen_success' in st.session_state and st.session_state.random_gen_success:
+        st.success(st.session_state.random_gen_success)
+        # Clear the message after showing it
+        st.session_state.random_gen_success = None
+    
     # Quick Start section at the top
     st.subheader("🎲 Quick Start")
     
     col_rand1_top, col_rand2_top = st.columns(2)
     
-    # Initialize button counter to ensure unique keys even on reload
-    if 'button_counter' not in st.session_state:
-        st.session_state.button_counter = 0
-    st.session_state.button_counter += 1
+
     
     with col_rand1_top:
-        if st.button("🎲 Random Template", key=f"btn_random_template_quickstart_{st.session_state.button_counter}", use_container_width=True, help="Generate a random coaster with 5-10 blocks"):
+        if st.button("🎲 Random Template", key=f"btn_random_template_quickstart", use_container_width=True, help="Generate a random coaster with 5-10 blocks"):
             import random
             
-            # Random number of blocks (targeting ~500m)
-            num_blocks = random.randint(6, 10)
-            
-            # Always start with launch, then lift hill followed by a vertical drop and a flat section
-            new_sequence = [
+            try:
+                # Random number of blocks (targeting ~500m)
+                num_blocks = random.randint(6, 10)
+                
+                # Always start with launch, then lift hill followed by a vertical drop and a flat section
+                new_sequence = [
                 {
                     'type': 'launch',
                     'block': BLOCK_LIBRARY['launch'],
@@ -212,102 +216,118 @@ with st.sidebar:
                     'block': BLOCK_LIBRARY['flat_section'],
                     'params': {'length': random.randint(20, 40)}
                 }
-            ]
-            
-            # Available blocks (after initial drop + flat)
-            # Exclude banked_turn and spiral to avoid lateral forces in random designs
-            available_blocks = ['drop', 'loop', 'airtime_hill', 'bunny_hop', 'launch']
-
-            # Record the initial drop height to cap later drops to <= 1/3
-            first_drop_height = next((b['params']['height'] for b in new_sequence if b['type'] == 'drop'), None)
-            
-            for i in range(num_blocks - 4):  # -4 because we added launch + lift + drop + flat
-                block_type = random.choice(available_blocks)
-                # Enforce: at least one flat section in every 3 blocks
-                # Check last two blocks (after the initial lift+drop+flat)
-                recent_types = [b['type'] for b in new_sequence[-2:]] if len(new_sequence) >= 2 else []
-                # If this would make three consecutive without a flat, force a flat_section
-                if (i % 3 == 2) and ('flat_section' not in recent_types):
-                    block_type = 'flat_section'
+                ]
                 
-                if block_type == 'drop':
-                    # Cap height to at most 1/3 of the original first drop
-                    if first_drop_height is not None:
-                        max_drop = max(10, int(first_drop_height / 3))
+                # Available blocks (after initial drop + flat)
+                # Exclude banked_turn and spiral to avoid lateral forces in random designs
+                available_blocks = ['drop', 'loop', 'airtime_hill', 'bunny_hop', 'launch']
+
+                # Record the initial drop height to cap later drops to <= 1/3
+                first_drop_height = next((b['params']['height'] for b in new_sequence if b['type'] == 'drop'), None)
+                
+                for i in range(num_blocks - 4):  # -4 because we added launch + lift + drop + flat
+                    block_type = random.choice(available_blocks)
+                    # Enforce: at least one flat section in every 3 blocks
+                    # Check last two blocks (after the initial lift+drop+flat)
+                    recent_types = [b['type'] for b in new_sequence[-2:]] if len(new_sequence) >= 2 else []
+                    # If this would make three consecutive without a flat, force a flat_section
+                    if (i % 3 == 2) and ('flat_section' not in recent_types):
+                        block_type = 'flat_section'
+                    
+                    # Initialize params to None to catch any unhandled block types
+                    params = None
+                    
+                    if block_type == 'drop':
+                        # Cap height to at most 1/3 of the original first drop
+                        if first_drop_height is not None:
+                            max_drop = max(10, int(first_drop_height / 3))
+                            params = {
+                                'height': random.randint(10, max_drop),
+                                'steepness': random.uniform(0.7, 0.9)
+                            }
+                        else:
+                            params = {
+                                'height': random.randint(25, 50),
+                                'steepness': random.uniform(0.7, 0.9)
+                            }
+                    elif block_type == 'loop':
+                        params = {'diameter': random.randint(20, 35)}
+                    elif block_type == 'airtime_hill':
                         params = {
-                            'height': random.randint(10, max_drop),
-                            'steepness': random.uniform(0.7, 0.9)
+                            'length': random.randint(30, 60),
+                            'height': random.randint(10, 20)
+                        }
+                    elif block_type == 'spiral':
+                        params = {
+                            'diameter': random.randint(20, 30),
+                            'turns': random.uniform(1.0, 2.0)
+                        }
+                    elif block_type == 'bunny_hop':
+                        params = {
+                            'length': random.randint(15, 30),
+                            'height': random.randint(5, 12)
+                        }
+                    elif block_type == 'banked_turn':
+                        params = {
+                            'radius': random.randint(20, 35),
+                            'angle': random.randint(60, 120)
+                        }
+                    elif block_type == 'launch':
+                        params = {
+                            'length': random.randint(30, 50),
+                            'speed_boost': random.randint(20, 28)
+                        }
+                    elif block_type == 'flat_section':
+                        params = {
+                            'length': random.randint(20, 40)
+                        }
+                    elif block_type == 'brake_run':
+                        params = {
+                            'length': random.randint(25, 40)
                         }
                     else:
-                        params = {
-                            'height': random.randint(25, 50),
-                            'steepness': random.uniform(0.7, 0.9)
-                        }
-                elif block_type == 'loop':
-                    params = {'diameter': random.randint(20, 35)}
-                elif block_type == 'airtime_hill':
-                    params = {
-                        'length': random.randint(30, 60),
-                        'height': random.randint(10, 20)
-                    }
-                elif block_type == 'spiral':
-                    params = {
-                        'diameter': random.randint(20, 30),
-                        'turns': random.uniform(1.0, 2.0)
-                    }
-                elif block_type == 'bunny_hop':
-                    params = {
-                        'length': random.randint(15, 30),
-                        'height': random.randint(5, 12)
-                    }
-                elif block_type == 'banked_turn':
-                    params = {
-                        'radius': random.randint(20, 35),
-                        'angle': random.randint(60, 120)
-                    }
-                elif block_type == 'launch':
-                    params = {
-                        'length': random.randint(30, 50),
-                        'speed_boost': random.randint(20, 28)
-                    }
-                elif block_type == 'flat_section':
-                    params = {
-                        'length': random.randint(20, 40)
-                    }
-                elif block_type == 'brake_run':
-                    params = {
-                        'length': random.randint(25, 40)
-                    }
+                        # Fallback for any unhandled block types
+                        st.error(f"Unknown block type in random generation: {block_type}")
+                        params = {'length': 30}  # Default params
+                    
+                    # Only append if params were successfully set
+                    if params is not None:
+                        new_sequence.append({
+                            'type': block_type,
+                            'block': BLOCK_LIBRARY[block_type],
+                            'params': params
+                        })
+                    else:
+                        st.error(f"Failed to generate params for block type: {block_type}")
                 
+                # Always end with a brake run
                 new_sequence.append({
-                    'type': block_type,
-                    'block': BLOCK_LIBRARY[block_type],
-                    'params': params
+                    'type': 'brake_run',
+                    'block': BLOCK_LIBRARY['brake_run'],
+                    'params': {'length': random.randint(25, 40)}
                 })
-            
-            # Always end with a brake run
-            new_sequence.append({
-                'type': 'brake_run',
-                'block': BLOCK_LIBRARY['brake_run'],
-                'params': {'length': random.randint(25, 40)}
-            })
-            
-            st.session_state.track_sequence = new_sequence
-            # Clear cached metrics to force recomputation on rerun
-            st.session_state.predicted_rating = None
-            st.session_state.accel_df = None
-            st.session_state.airtime_metrics = None
-            st.session_state.track_generated = False
-            # Enforce end level equals start for random generation
-            st.session_state.force_end_level = True
-            st.session_state.start_level = 0.0
-            # Disable 3D for random designs (2D tracks should have no lateral forces)
-            st.session_state.random_3d = False
-            st.success(f"🎲 Generated random coaster with {num_blocks} blocks!")
-            st.rerun()
+                
+                st.session_state.track_sequence = new_sequence
+                # Clear cached metrics to force recomputation on rerun
+                st.session_state.predicted_rating = None
+                st.session_state.accel_df = None
+                st.session_state.airtime_metrics = None
+                st.session_state.track_generated = False
+                # Enforce end level equals start for random generation
+                st.session_state.force_end_level = True
+                st.session_state.start_level = 0.0
+                # Disable 3D for random designs (2D tracks should have no lateral forces)
+                st.session_state.random_3d = False
+                # Store success message in session state to show after rerun
+                st.session_state.random_gen_success = f"🎲 Generated random coaster with {num_blocks} blocks!"
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Error generating random coaster: {str(e)}")
+                import traceback
+                st.exception(e)
     
     with col_rand2_top:
-        if st.button("🔄 \n Reset to Default", key=f"btn_reset_default_quickstart_{st.session_state.button_counter}", use_container_width=True, help="Reset to the starter template"):
+        if st.button("🔄 \n Reset to Default", key=f"btn_reset_default_quickstart", use_container_width=True, help="Reset to the starter template"):
             st.session_state.track_sequence = [
                 {
                     'type': 'launch',

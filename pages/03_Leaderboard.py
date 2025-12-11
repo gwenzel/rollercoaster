@@ -252,8 +252,8 @@ else:
     
     # Add utopia point (ideal point)
     fig_pareto.add_trace(go.Scatter(
-        x=[utopia_score],
-        y=[utopia_safety],
+        x=[5.0],
+        y=[5.0],
         mode='markers',
         marker=dict(
             color='blue',
